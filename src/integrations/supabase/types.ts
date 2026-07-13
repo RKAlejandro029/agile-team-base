@@ -341,7 +341,27 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      profiles_directory: {
+        Row: {
+          current_task: string | null
+          department: string | null
+          full_name: string | null
+          id: string | null
+        }
+        Insert: {
+          current_task?: string | null
+          department?: string | null
+          full_name?: string | null
+          id?: string | null
+        }
+        Update: {
+          current_task?: string | null
+          department?: string | null
+          full_name?: string | null
+          id?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       has_role: {
