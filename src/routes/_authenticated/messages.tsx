@@ -93,10 +93,10 @@ function MessagesPage() {
                 selectedId === c.id && "bg-accent"
               )}
             >
-              <Avatar className="h-9 w-9"><AvatarFallback>{(c.full_name || c.email).slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+              <Avatar className="h-9 w-9"><AvatarFallback>{(c.full_name || "?").slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{c.full_name || c.email}</p>
-                <p className="text-xs text-muted-foreground truncate">{c.email}</p>
+                <p className="text-sm font-medium truncate">{c.full_name || "Unnamed"}</p>
+                {c.department && <p className="text-xs text-muted-foreground truncate">{c.department}</p>}
               </div>
             </button>
           ))}
