@@ -341,29 +341,18 @@ export type Database = {
       }
     }
     Views: {
-      profiles_directory: {
-        Row: {
-          current_task: string | null
-          department: string | null
-          full_name: string | null
-          id: string | null
-        }
-        Insert: {
-          current_task?: string | null
-          department?: string | null
-          full_name?: string | null
-          id?: string | null
-        }
-        Update: {
-          current_task?: string | null
-          department?: string | null
-          full_name?: string | null
-          id?: string | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
+      get_profiles_directory: {
+        Args: never
+        Returns: {
+          current_task: string
+          department: string
+          full_name: string
+          id: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
