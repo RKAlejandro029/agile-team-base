@@ -107,8 +107,8 @@ function MessagesPage() {
         {selected ? (
           <>
             <div className="p-4 border-b bg-card flex items-center gap-3">
-              <Avatar className="h-8 w-8"><AvatarFallback>{(selected.full_name || selected.email).slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
-              <div><p className="font-medium">{selected.full_name || selected.email}</p><p className="text-xs text-muted-foreground">{selected.email}</p></div>
+              <Avatar className="h-8 w-8"><AvatarFallback>{(selected.full_name || "?").slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+              <div><p className="font-medium">{selected.full_name || "Unnamed"}</p>{selected.department && <p className="text-xs text-muted-foreground">{selected.department}</p>}</div>
             </div>
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2">
               {messagesQ.data?.map((m) => {
