@@ -1,0 +1,128 @@
+import { Link, useRouterState } from "@tanstack/react-router";
+import {
+  LayoutDashboard,
+  Clock,
+  CalendarDays,
+  MessageSquare,
+  Mail,
+  Calendar,
+  Ticket,
+  LogOut,
+  Users,
+  Briefcase,
+} from "lucide-react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { useAuth } from "@/hooks/use-auth";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+
+const items = [
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Time Tracking", url: "/time", icon: Clock },
+  { title: "Leave & Holidays", url: "/leave", icon: CalendarDays },
+  { title: "Messages", url: "/messages", icon: MessageSquare },
+  { title: "Email", url: "/email", icon: Mail },
+  { title: "Calendar", url: "/calendar", icon: Calendar },
+  { title: "Tickets", url: "/tickets", icon: Ticket },
+];
+
+export function AppSidebar() {
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const { user, role, signOut } = useAuth();
+
+  const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
+
+  return (
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="border-b border-sidebar-border">
+        <div className="flex items-center gap-2 px-2 py-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+            <Briefcase className="h-4 w-4" />
+          </div>
+          {!collapsed && (
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold text-sidebar-foreground">Consultly</span>
+              <span className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
+                {role === "admin" ? "Admin Console" : "Consultant"}
+              </span>
+            </div>
+          )}
+        </div>
+      </SidebarHeader>
+
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {items.map((item) => {
+                const active = pathname === item.url || pathname.startsWith(item.url + "/");
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={active}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+              {role === "admin" && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/team"}>
+                    <Link to="/team">
+                      <Users className="h-4 w-4" />
+                      <span>Team</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+
+      <SidebarFooter className="border-t border-sidebar-border">
+        <div className="flex items-center gap-2 p-2">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground text-xs">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          {!collapsed && (
+            <>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-sidebar-foreground truncate">{user?.email}</p>
+                <p className="text-[10px] text-sidebar-foreground/60 capitalize">{role}</p>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                onClick={() => signOut()}
+                aria-label="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
+      </SidebarFooter>
+    </Sidebar>
+  );
+}
