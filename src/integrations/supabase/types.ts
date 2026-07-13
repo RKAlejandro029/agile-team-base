@@ -344,6 +344,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_profiles_directory: {
+        Args: never
+        Returns: {
+          current_task: string
+          department: string
+          full_name: string
+          id: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

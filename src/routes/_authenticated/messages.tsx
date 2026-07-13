@@ -26,7 +26,8 @@ function MessagesPage() {
   const contactsQ = useQuery({
     queryKey: ["contacts", user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("id, full_name, email").neq("id", user!.id);
+      const { data } = await supabase.rpc("get_profiles_directory");
+      return (data ?? []).filter((c) => c.id !== user!.id);
       return data ?? [];
     },
     enabled: !!user,
@@ -92,10 +93,10 @@ function MessagesPage() {
                 selectedId === c.id && "bg-accent"
               )}
             >
-              <Avatar className="h-9 w-9"><AvatarFallback>{(c.full_name || c.email).slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+              <Avatar className="h-9 w-9"><AvatarFallback>{(c.full_name || "?").slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{c.full_name || c.email}</p>
-                <p className="text-xs text-muted-foreground truncate">{c.email}</p>
+                <p className="text-sm font-medium truncate">{c.full_name || "Unnamed"}</p>
+                {c.department && <p className="text-xs text-muted-foreground truncate">{c.department}</p>}
               </div>
             </button>
           ))}
@@ -106,8 +107,8 @@ function MessagesPage() {
         {selected ? (
           <>
             <div className="p-4 border-b bg-card flex items-center gap-3">
-              <Avatar className="h-8 w-8"><AvatarFallback>{(selected.full_name || selected.email).slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
-              <div><p className="font-medium">{selected.full_name || selected.email}</p><p className="text-xs text-muted-foreground">{selected.email}</p></div>
+              <Avatar className="h-8 w-8"><AvatarFallback>{(selected.full_name || "?").slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+              <div><p className="font-medium">{selected.full_name || "Unnamed"}</p>{selected.department && <p className="text-xs text-muted-foreground">{selected.department}</p>}</div>
             </div>
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2">
               {messagesQ.data?.map((m) => {
