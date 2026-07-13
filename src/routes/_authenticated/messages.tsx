@@ -26,7 +26,8 @@ function MessagesPage() {
   const contactsQ = useQuery({
     queryKey: ["contacts", user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("id, full_name, email").neq("id", user!.id);
+      const { data } = await supabase.rpc("get_profiles_directory");
+      return (data ?? []).filter((c) => c.id !== user!.id);
       return data ?? [];
     },
     enabled: !!user,
