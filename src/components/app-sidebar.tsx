@@ -9,7 +9,9 @@ import {
   Ticket,
   LogOut,
   Users,
+  KeyRound,
 } from "lucide-react";
+import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import {
   Sidebar,
   SidebarContent,
@@ -113,6 +115,18 @@ export function AppSidebar() {
                 </p>
                 <p className="text-[10px] text-sidebar-foreground/60 capitalize">{role}</p>
               </div>
+              <ChangePasswordDialog
+                trigger={
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                    aria-label="Change password"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                  </Button>
+                }
+              />
               <Button
                 size="icon"
                 variant="ghost"
