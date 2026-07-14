@@ -3,8 +3,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useEffect, useState } from "react";
-import { Clock, Play, Square, CalendarDays, Ticket, MessageSquare } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Clock,
+  Play,
+  Square,
+  CalendarDays,
+  Ticket,
+  TicketCheck,
+  MessageSquare,
+} from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { formatDistanceToNowStrict } from "date-fns";
 import { toast } from "sonner";
@@ -63,9 +71,11 @@ export function ConsultantHome() {
           .order("start_time")
           .limit(3),
       ]);
+      const ticketRows = tickets.data ?? [];
       return {
         balances: balances.data ?? [],
-        openTickets: tickets.data?.length ?? 0,
+        ongoingTickets: ticketRows.filter((t) => t.status === "in_progress").length,
+        pendingTickets: ticketRows.filter((t) => t.status === "open").length,
         unread: unread.data?.length ?? 0,
         events: events.data ?? [],
       };
@@ -87,7 +97,7 @@ export function ConsultantHome() {
       }
     },
     onSuccess: () => {
-      toast.success(openAttendanceQ.data ? "Clocked out" : "Clocked in");
+      toast.success(openAttendanceQ.data ? "Clocked out" : "You're now clocked in");
       qc.invalidateQueries({ queryKey: ["open-attendance"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -111,8 +121,22 @@ export function ConsultantHome() {
   const activeSince = openAttendanceQ.data ? new Date(openAttendanceQ.data.clock_in) : null;
   const firstName = profileQ.data?.full_name?.split(" ")[0] || "there";
 
+  // Live-ticking elapsed time. React Query only re-renders every 30s (refetchInterval),
+  // which read as "no timer" — this forces a re-render every second while clocked in
+  // so the mm:ss actually counts up instead of sitting frozen.
+  const [, setTick] = useState(0);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (isClockedIn) {
+      tickRef.current = setInterval(() => setTick((t) => t + 1), 1000);
+    }
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+    };
+  }, [isClockedIn]);
+
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10 space-y-8">
+    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10 space-y-6">
       <div className="border-b pb-6">
         <p className="font-mono-data text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           {new Date().toLocaleDateString(undefined, {
@@ -140,13 +164,13 @@ export function ConsultantHome() {
               (isClockedIn ? "border-success text-success" : "border-border text-muted-foreground")
             }
           >
-            <Clock className="h-5 w-5" />
+            <Clock className={"h-5 w-5" + (isClockedIn ? " animate-pulse" : "")} />
           </div>
           <div>
             <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
               Time tracking
             </p>
-            <p className="font-mono-data text-lg text-foreground">
+            <p className="font-mono-data text-lg text-foreground tabular-nums">
               {isClockedIn ? formatDistanceToNowStrict(activeSince!) : "Not clocked in"}
             </p>
           </div>
@@ -170,34 +194,33 @@ export function ConsultantHome() {
         </Button>
       </div>
 
-      {/* Status line */}
-      <div className="rounded-md border p-5 sm:p-6">
-        <h2 className="font-display text-base font-medium">What are you working on?</h2>
+      {/* Status line — compact single-row form, no longer a full card block */}
+      <div className="flex flex-col gap-2 rounded-md border px-4 py-3 sm:flex-row sm:items-center">
+        <label className="shrink-0 text-xs font-medium text-muted-foreground sm:w-36">
+          What are you working on?
+        </label>
         <form
-          className="mt-3 flex flex-col gap-2 sm:flex-row"
+          className="flex flex-1 gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             saveTask.mutate();
           }}
         >
           <Input
-            placeholder="e.g. Client A financial audit — reviewing Q3 statements"
+            placeholder="e.g. Client A financial audit"
             value={taskDraft}
             onChange={(e) => setTaskDraft(e.target.value)}
             maxLength={280}
-            className="flex-1"
+            className="h-8 flex-1 text-sm"
           />
-          <Button type="submit" disabled={saveTask.isPending} className="sm:w-auto">
+          <Button type="submit" size="sm" disabled={saveTask.isPending}>
             Update
           </Button>
         </form>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Visible on the admin dashboard in real time.
-        </p>
       </div>
 
       {/* Quick figures — ledger strip, matches admin dashboard's stat treatment */}
-      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-3 lg:grid-cols-5 sm:divide-x sm:divide-y-0">
         <QuickCell
           to="/leave"
           icon={<CalendarDays className="h-3.5 w-3.5" />}
@@ -211,10 +234,17 @@ export function ConsultantHome() {
         />
         <QuickCell
           to="/tickets"
+          icon={<TicketCheck className="h-3.5 w-3.5" />}
+          label="Ongoing tickets"
+          value={summaryQ.data?.ongoingTickets ?? "—"}
+          sub="in progress"
+        />
+        <QuickCell
+          to="/tickets"
           icon={<Ticket className="h-3.5 w-3.5" />}
-          label="Open tickets"
-          value={summaryQ.data?.openTickets ?? "—"}
-          sub="assigned to you"
+          label="Pending tickets"
+          value={summaryQ.data?.pendingTickets ?? "—"}
+          sub="not yet started"
         />
         <QuickCell
           to="/messages"
