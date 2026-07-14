@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,8 +8,20 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Shield, User as UserIcon } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Shield, User as UserIcon, UserPlus } from "lucide-react";
 import { toast } from "sonner";
+import { createUserFn } from "@/server/team.functions";
 
 export const Route = createFileRoute("/_authenticated/team")({
   component: TeamPage,
@@ -17,6 +30,11 @@ export const Route = createFileRoute("/_authenticated/team")({
 function TeamPage() {
   const { role, user } = useAuth();
   const qc = useQueryClient();
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newFullName, setNewFullName] = useState("");
 
   const dataQ = useQuery({
     queryKey: ["team", role],
@@ -47,15 +65,97 @@ function TeamPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const createUser = useMutation({
+    mutationFn: async () => {
+      return createUserFn({
+        data: { email: newEmail, password: newPassword, fullName: newFullName || undefined },
+      });
+    },
+    onSuccess: () => {
+      toast.success("User created");
+      setAddOpen(false);
+      setNewEmail("");
+      setNewPassword("");
+      setNewFullName("");
+      qc.invalidateQueries({ queryKey: ["team"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   if (role !== "admin") {
     return <div className="p-6"><p className="text-muted-foreground">Admins only.</p></div>;
   }
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
-        <p className="text-sm text-muted-foreground">Manage roles across the workspace.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
+          <p className="text-sm text-muted-foreground">Manage roles across the workspace.</p>
+        </div>
+
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm">
+              <UserPlus className="h-4 w-4 mr-1.5" />
+              Add user
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add a new user</DialogTitle>
+              <DialogDescription>
+                Creates the account directly with the email and password you set below. They'll start as a
+                Consultant and can change their password after signing in.
+              </DialogDescription>
+            </DialogHeader>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                createUser.mutate();
+              }}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="new-user-name">Full name</Label>
+                <Input
+                  id="new-user-name"
+                  value={newFullName}
+                  onChange={(e) => setNewFullName(e.target.value)}
+                  placeholder="Jane Doe"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-user-email">Email</Label>
+                <Input
+                  id="new-user-email"
+                  type="email"
+                  required
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="jane@company.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-user-password">Temporary password</Label>
+                <Input
+                  id="new-user-password"
+                  type="text"
+                  required
+                  minLength={8}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                />
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={createUser.isPending}>
+                  {createUser.isPending ? "Creating…" : "Create user"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <Card>
