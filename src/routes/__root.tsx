@@ -79,13 +79,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Consultly — Consultant Management Platform" },
+      { title: "Fintreas — Consultant Management System" },
       {
         name: "description",
         content:
           "Attendance, leave, messaging, calendar, tickets and email — one workspace for your consulting team.",
       },
-      { property: "og:title", content: "Consultly — Consultant Management Platform" },
+      { property: "og:title", content: "Fintreas — Consultant Management System" },
       {
         property: "og:description",
         content: "Attendance, leave, messaging, calendar, tickets and email in one workspace.",
@@ -102,6 +102,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   shellComponent: RootShell,
