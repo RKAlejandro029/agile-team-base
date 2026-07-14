@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Shield, User as UserIcon, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import { createUserFn } from "@/server/team.functions";
+import { createUserFn } from "@/functions/team.functions";
 
 export const Route = createFileRoute("/_authenticated/team")({
   component: TeamPage,
