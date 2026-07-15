@@ -5,7 +5,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -19,9 +26,20 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Shield, User as UserIcon, UserPlus } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Shield, User as UserIcon, UserPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { createUserFn } from "@/functions/team.functions";
+import { createUserFn, deleteUserFn } from "@/functions/team.functions";
+import { DEFAULT_NEW_USER_PASSWORD } from "@/config/team";
 
 export const Route = createFileRoute("/_authenticated/team")({
   component: TeamPage,
@@ -33,8 +51,9 @@ function TeamPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [newEmail, setNewEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+  const [newPassword, setNewPassword] = useState(DEFAULT_NEW_USER_PASSWORD);
   const [newFullName, setNewFullName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
 
   const dataQ = useQuery({
     queryKey: ["team", role],
@@ -51,10 +70,16 @@ function TeamPage() {
   const toggleAdmin = useMutation({
     mutationFn: async ({ userId, makeAdmin }: { userId: string; makeAdmin: boolean }) => {
       if (makeAdmin) {
-        const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: "admin" });
+        const { error } = await supabase
+          .from("user_roles")
+          .insert({ user_id: userId, role: "admin" });
         if (error && !error.message.includes("duplicate")) throw error;
       } else {
-        const { error } = await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", "admin");
+        const { error } = await supabase
+          .from("user_roles")
+          .delete()
+          .eq("user_id", userId)
+          .eq("role", "admin");
         if (error) throw error;
       }
     },
@@ -75,15 +100,34 @@ function TeamPage() {
       toast.success("User created");
       setAddOpen(false);
       setNewEmail("");
-      setNewPassword("");
+      setNewPassword(DEFAULT_NEW_USER_PASSWORD);
       setNewFullName("");
       qc.invalidateQueries({ queryKey: ["team"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const deleteUser = useMutation({
+    mutationFn: async (userId: string) => {
+      return deleteUserFn({ data: { userId } });
+    },
+    onSuccess: () => {
+      toast.success("User deleted");
+      setDeleteTarget(null);
+      qc.invalidateQueries({ queryKey: ["team"] });
+    },
+    onError: (e: Error) => {
+      toast.error(e.message);
+      setDeleteTarget(null);
+    },
+  });
+
   if (role !== "admin") {
-    return <div className="p-6"><p className="text-muted-foreground">Admins only.</p></div>;
+    return (
+      <div className="p-6">
+        <p className="text-muted-foreground">Admins only.</p>
+      </div>
+    );
   }
 
   return (
@@ -105,8 +149,8 @@ function TeamPage() {
             <DialogHeader>
               <DialogTitle>Add a new user</DialogTitle>
               <DialogDescription>
-                Creates the account directly with the email and password you set below. They'll start as a
-                Consultant and can change their password after signing in.
+                Creates the account directly with the email and password you set below. They'll
+                start as a Consultant and can change their password after signing in.
               </DialogDescription>
             </DialogHeader>
             <form
@@ -147,6 +191,12 @@ function TeamPage() {
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="At least 8 characters"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Pre-filled from the team default — edit here for just this user, or change{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">DEFAULT_NEW_USER_PASSWORD</code> in{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">src/config/team.ts</code> to change
+                  it for everyone created after that.
+                </p>
               </div>
               <DialogFooter>
                 <Button type="submit" disabled={createUser.isPending}>
@@ -159,7 +209,9 @@ function TeamPage() {
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Members</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">Members</CardTitle>
+        </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
@@ -172,13 +224,20 @@ function TeamPage() {
             </TableHeader>
             <TableBody>
               {dataQ.data?.profiles.map((p) => {
-                const userRoles = dataQ.data!.roles.filter((r) => r.user_id === p.id).map((r) => r.role);
+                const userRoles = dataQ
+                  .data!.roles.filter((r) => r.user_id === p.id)
+                  .map((r) => r.role);
                 const isAdmin = userRoles.includes("admin");
+                const isSelf = p.id === user?.id;
                 return (
                   <TableRow key={p.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8"><AvatarFallback>{(p.full_name || p.email).slice(0, 2).toUpperCase()}</AvatarFallback></Avatar>
+                        <Avatar className="h-8 w-8">
+                          <AvatarFallback>
+                            {(p.full_name || p.email).slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
                         <div>
                           <p className="font-medium">{p.full_name || "—"}</p>
                           <p className="text-xs text-muted-foreground">{p.email}</p>
@@ -189,18 +248,44 @@ function TeamPage() {
                     <TableCell>
                       <div className="flex gap-1">
                         {userRoles.map((r) => (
-                          <Badge key={r} variant={r === "admin" ? "default" : "secondary"} className="capitalize">
-                            {r === "admin" ? <Shield className="h-3 w-3 mr-1" /> : <UserIcon className="h-3 w-3 mr-1" />}
+                          <Badge
+                            key={r}
+                            variant={r === "admin" ? "default" : "secondary"}
+                            className="capitalize"
+                          >
+                            {r === "admin" ? (
+                              <Shield className="h-3 w-3 mr-1" />
+                            ) : (
+                              <UserIcon className="h-3 w-3 mr-1" />
+                            )}
                             {r}
                           </Badge>
                         ))}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      {p.id !== user?.id && (
-                        <Button size="sm" variant="outline" onClick={() => toggleAdmin.mutate({ userId: p.id, makeAdmin: !isAdmin })}>
-                          {isAdmin ? "Revoke admin" : "Make admin"}
-                        </Button>
+                      {!isSelf && (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              toggleAdmin.mutate({ userId: p.id, makeAdmin: !isAdmin })
+                            }
+                          >
+                            {isAdmin ? "Revoke admin" : "Make admin"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() =>
+                              setDeleteTarget({ id: p.id, label: p.full_name || p.email })
+                            }
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
@@ -210,6 +295,29 @@ function TeamPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.label}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes their account and sign-in access, along with their attendance
+              history, leave requests, messages, and tickets they created. Tickets assigned to them
+              stay, just unassigned. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteUser.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteUser.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteTarget && deleteUser.mutate(deleteTarget.id)}
+            >
+              {deleteUser.isPending ? "Deleting…" : "Delete user"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

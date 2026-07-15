@@ -48,3 +48,44 @@ export const createUserFn = createServerFn({ method: "POST" })
 
     return { userId: created.user?.id, email: created.user?.email };
   });
+
+const deleteUserSchema = z.object({
+  userId: z.string().uuid("Invalid user id"),
+});
+
+export const deleteUserFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((data: unknown) => deleteUserSchema.parse(data))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // Re-verify the caller is an admin server-side. Do not trust anything from the client.
+    const { data: callerRoles, error: roleError } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId)
+      .eq("role", "admin");
+
+    if (roleError) {
+      throw new Error("Could not verify permissions");
+    }
+    if (!callerRoles || callerRoles.length === 0) {
+      throw new Error("Forbidden: admin role required");
+    }
+
+    // Don't let an admin delete their own account through this flow — that's how
+    // you end up locked out with no admin left. Self-removal, if ever needed,
+    // should be a deliberate separate action.
+    if (data.userId === context.userId) {
+      throw new Error("You can't delete your own account.");
+    }
+
+    // Deleting from auth.users cascades to profiles / user_roles / attendance_logs /
+    // etc. via the ON DELETE CASCADE foreign keys set up in the schema.
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.userId);
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { userId: data.userId };
+  });
