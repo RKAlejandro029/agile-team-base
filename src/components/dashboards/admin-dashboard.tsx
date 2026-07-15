@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatusBadge, type UserStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, Users, Calendar, Ticket, PlaneTakeoff } from "lucide-react";
+import { MessageSquare, Users, Calendar, Ticket, PlaneTakeoff, Coffee } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { formatDistanceToNowStrict } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -23,31 +23,44 @@ export function AdminDashboard() {
     queryKey: ["admin-dashboard"],
     queryFn: async () => {
       const today = new Date().toISOString().slice(0, 10);
-      const [profilesRes, rolesRes, attendanceRes, leaveRes, ticketsRes] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email, department, current_task"),
-        supabase.from("user_roles").select("user_id, role").eq("role", "consultant"),
-        supabase
-          .from("attendance_logs")
-          .select("id, user_id, clock_in, clock_out")
-          .order("clock_in", { ascending: false })
-          .limit(500),
-        supabase
-          .from("leave_requests")
-          .select("id, user_id, status, start_date, end_date")
-          .eq("status", "approved")
-          .lte("start_date", today)
-          .gte("end_date", today),
-        supabase.from("tickets").select("id, status").in("status", ["open", "in_progress"]),
-      ]);
+      const [profilesRes, rolesRes, attendanceRes, breaksRes, leaveRes, ticketsRes] =
+        await Promise.all([
+          supabase.from("profiles").select("id, full_name, email, department, current_task"),
+          supabase.from("user_roles").select("user_id, role").eq("role", "consultant"),
+          supabase
+            .from("attendance_logs")
+            .select("id, user_id, clock_in, clock_out")
+            .order("clock_in", { ascending: false })
+            .limit(500),
+          supabase
+            .from("attendance_breaks")
+            .select("attendance_log_id, break_end")
+            .is("break_end", null),
+          supabase
+            .from("leave_requests")
+            .select("id, user_id, status, start_date, end_date")
+            .eq("status", "approved")
+            .lte("start_date", today)
+            .gte("end_date", today),
+          supabase.from("tickets").select("id, status").in("status", ["open", "in_progress"]),
+        ]);
 
       const consultantIds = new Set((rolesRes.data ?? []).map((r) => r.user_id));
       const profiles = (profilesRes.data ?? []).filter((p) => consultantIds.has(p.id));
       const onLeave = new Set((leaveRes.data ?? []).map((l) => l.user_id));
+      const openBreakLogIds = new Set((breaksRes.data ?? []).map((b) => b.attendance_log_id));
 
-      const latestByUser = new Map<string, { clock_in: string; clock_out: string | null }>();
+      const latestByUser = new Map<
+        string,
+        { id: string; clock_in: string; clock_out: string | null }
+      >();
       for (const log of attendanceRes.data ?? []) {
         if (!latestByUser.has(log.user_id)) {
-          latestByUser.set(log.user_id, { clock_in: log.clock_in, clock_out: log.clock_out });
+          latestByUser.set(log.user_id, {
+            id: log.id,
+            clock_in: log.clock_in,
+            clock_out: log.clock_out,
+          });
         }
       }
 
@@ -57,7 +70,7 @@ export function AdminDashboard() {
         let activeSince: Date | null = null;
         if (onLeave.has(p.id)) status = "leave";
         else if (latest && !latest.clock_out) {
-          status = "active";
+          status = openBreakLogIds.has(latest.id) ? "break" : "active";
           activeSince = new Date(latest.clock_in);
         }
         return {
@@ -74,6 +87,7 @@ export function AdminDashboard() {
       return {
         consultants,
         activeCount: consultants.filter((c) => c.status === "active").length,
+        onBreakCount: consultants.filter((c) => c.status === "break").length,
         onLeaveCount: consultants.filter((c) => c.status === "leave").length,
         openTickets: ticketsRes.data?.length ?? 0,
       };
@@ -104,12 +118,18 @@ export function AdminDashboard() {
       </div>
 
       {/* Ledger-style stat strip — one panel, quiet dividers, no icon tiles */}
-      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-3 lg:grid-cols-5 sm:divide-x sm:divide-y-0">
         <StatCell
           icon={<Users className="h-3.5 w-3.5" />}
           label="Active now"
           value={data?.activeCount ?? "—"}
           tone="success"
+        />
+        <StatCell
+          icon={<Coffee className="h-3.5 w-3.5" />}
+          label="On break"
+          value={data?.onBreakCount ?? "—"}
+          tone="warning"
         />
         <StatCell
           icon={<PlaneTakeoff className="h-3.5 w-3.5" />}

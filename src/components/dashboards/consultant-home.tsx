@@ -8,9 +8,11 @@ import {
   Clock,
   Play,
   Square,
+  Coffee,
   CalendarDays,
   Ticket,
   TicketCheck,
+  CircleDot,
   MessageSquare,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -52,17 +54,34 @@ export function ConsultantHome() {
     refetchInterval: 30_000,
   });
 
+  const attendanceLogId = openAttendanceQ.data?.id ?? null;
+
+  // Every break taken during the current open shift — lets us show the
+  // currently-open break (if any) plus a running total for the day.
+  const breaksQ = useQuery({
+    queryKey: ["shift-breaks", attendanceLogId],
+    queryFn: async () => {
+      if (!attendanceLogId) return [];
+      const { data } = await supabase
+        .from("attendance_breaks")
+        .select("*")
+        .eq("attendance_log_id", attendanceLogId)
+        .order("break_start", { ascending: true });
+      return data ?? [];
+    },
+    enabled: !!attendanceLogId,
+    refetchInterval: 30_000,
+  });
+
   const summaryQ = useQuery({
     queryKey: ["consultant-summary", user?.id],
     queryFn: async () => {
       const today = new Date().toISOString().slice(0, 10);
       const [balances, tickets, unread, events] = await Promise.all([
         supabase.from("leave_balances").select("*").eq("user_id", user!.id),
-        supabase
-          .from("tickets")
-          .select("id, status")
-          .eq("created_by", user!.id)
-          .in("status", ["open", "in_progress"]),
+        // Every ticket in the workspace (not just this user's own) so the
+        // Open / Pending / Ongoing counts reflect the whole team's queue.
+        supabase.from("tickets").select("id, status"),
         supabase.from("messages").select("id").eq("receiver_id", user!.id).is("read_at", null),
         supabase
           .from("calendar_events")
@@ -74,8 +93,9 @@ export function ConsultantHome() {
       const ticketRows = tickets.data ?? [];
       return {
         balances: balances.data ?? [],
+        openTickets: ticketRows.filter((t) => t.status === "open").length,
         ongoingTickets: ticketRows.filter((t) => t.status === "in_progress").length,
-        pendingTickets: ticketRows.filter((t) => t.status === "open").length,
+        doneTickets: ticketRows.filter((t) => t.status === "done").length,
         unread: unread.data?.length ?? 0,
         events: events.data ?? [],
       };
@@ -86,6 +106,9 @@ export function ConsultantHome() {
   const clockMutation = useMutation({
     mutationFn: async () => {
       if (openAttendanceQ.data) {
+        if (openBreak) {
+          throw new Error("End your break before clocking out.");
+        }
         const { error } = await supabase
           .from("attendance_logs")
           .update({ clock_out: new Date().toISOString() })
@@ -99,6 +122,29 @@ export function ConsultantHome() {
     onSuccess: () => {
       toast.success(openAttendanceQ.data ? "Clocked out" : "You're now clocked in");
       qc.invalidateQueries({ queryKey: ["open-attendance"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const breakMutation = useMutation({
+    mutationFn: async () => {
+      if (!attendanceLogId) throw new Error("Clock in first.");
+      if (openBreak) {
+        const { error } = await supabase
+          .from("attendance_breaks")
+          .update({ break_end: new Date().toISOString() })
+          .eq("id", openBreak.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("attendance_breaks")
+          .insert({ attendance_log_id: attendanceLogId, user_id: user!.id });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      toast.success(openBreak ? "Break ended" : "Break started");
+      qc.invalidateQueries({ queryKey: ["shift-breaks", attendanceLogId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -121,9 +167,18 @@ export function ConsultantHome() {
   const activeSince = openAttendanceQ.data ? new Date(openAttendanceQ.data.clock_in) : null;
   const firstName = profileQ.data?.full_name?.split(" ")[0] || "there";
 
+  const openBreak = breaksQ.data?.find((b) => !b.break_end) ?? null;
+  const closedBreaksSeconds = (breaksQ.data ?? [])
+    .filter((b) => b.break_end)
+    .reduce(
+      (sum, b) =>
+        sum + (new Date(b.break_end!).getTime() - new Date(b.break_start).getTime()) / 1000,
+      0,
+    );
+
   // Live-ticking elapsed time. React Query only re-renders every 30s (refetchInterval),
   // which read as "no timer" — this forces a re-render every second while clocked in
-  // so the mm:ss actually counts up instead of sitting frozen.
+  // or on break, so the mm:ss actually counts up instead of sitting frozen.
   const [, setTick] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
@@ -134,6 +189,16 @@ export function ConsultantHome() {
       if (tickRef.current) clearInterval(tickRef.current);
     };
   }, [isClockedIn]);
+
+  const totalBreakSeconds =
+    closedBreaksSeconds +
+    (openBreak ? (Date.now() - new Date(openBreak.break_start).getTime()) / 1000 : 0);
+  const breakDurationLabel = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return h > 0 ? `${h}h ${mm}m` : `${mm}m`;
+  };
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10 space-y-6">
@@ -149,49 +214,91 @@ export function ConsultantHome() {
           Hi {firstName}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {isClockedIn
-            ? `You've been active for ${formatDistanceToNowStrict(activeSince!)}.`
-            : "You're currently clocked out."}
+          {!isClockedIn
+            ? "You're currently clocked out."
+            : openBreak
+              ? `On break — you've been active for ${formatDistanceToNowStrict(activeSince!)} today.`
+              : `You've been active for ${formatDistanceToNowStrict(activeSince!)}.`}
         </p>
       </div>
 
       {/* Shift panel — the day's single most important control */}
-      <div className="flex flex-col items-stretch gap-4 rounded-md border p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-        <div className="flex items-center gap-3">
-          <div
-            className={
-              "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 " +
-              (isClockedIn ? "border-success text-success" : "border-border text-muted-foreground")
-            }
-          >
-            <Clock className={"h-5 w-5" + (isClockedIn ? " animate-pulse" : "")} />
+      <div className="rounded-md border p-5 sm:p-6">
+        <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className={
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 " +
+                (openBreak
+                  ? "border-warning text-warning"
+                  : isClockedIn
+                    ? "border-success text-success"
+                    : "border-border text-muted-foreground")
+              }
+            >
+              {openBreak ? (
+                <Coffee className="h-5 w-5" />
+              ) : (
+                <Clock className={"h-5 w-5" + (isClockedIn ? " animate-pulse" : "")} />
+              )}
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                {openBreak ? "On break" : "Time tracking"}
+              </p>
+              <p className="font-mono-data text-lg text-foreground tabular-nums">
+                {isClockedIn ? formatDistanceToNowStrict(activeSince!) : "Not clocked in"}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-              Time tracking
-            </p>
-            <p className="font-mono-data text-lg text-foreground tabular-nums">
-              {isClockedIn ? formatDistanceToNowStrict(activeSince!) : "Not clocked in"}
-            </p>
+          <div className="flex gap-2">
+            {isClockedIn && (
+              <Button
+                size="lg"
+                variant="outline"
+                className={
+                  "flex-1 sm:flex-none sm:min-w-[140px]" +
+                  (openBreak
+                    ? " border-warning text-warning hover:bg-warning/10 hover:text-warning"
+                    : "")
+                }
+                onClick={() => breakMutation.mutate()}
+                disabled={breakMutation.isPending}
+              >
+                <Coffee className="mr-2 h-4 w-4" />
+                {openBreak ? "End break" : "Start break"}
+              </Button>
+            )}
+            <Button
+              size="lg"
+              className="flex-1 sm:flex-none sm:min-w-[140px]"
+              variant={isClockedIn ? "destructive" : "default"}
+              onClick={() => clockMutation.mutate()}
+              disabled={clockMutation.isPending || (isClockedIn && !!openBreak)}
+              title={isClockedIn && openBreak ? "End your break before clocking out" : undefined}
+            >
+              {isClockedIn ? (
+                <>
+                  <Square className="mr-2 h-4 w-4" /> Clock out
+                </>
+              ) : (
+                <>
+                  <Play className="mr-2 h-4 w-4" /> Clock in
+                </>
+              )}
+            </Button>
           </div>
         </div>
-        <Button
-          size="lg"
-          className="w-full sm:w-auto sm:min-w-[160px]"
-          variant={isClockedIn ? "destructive" : "default"}
-          onClick={() => clockMutation.mutate()}
-          disabled={clockMutation.isPending}
-        >
-          {isClockedIn ? (
-            <>
-              <Square className="mr-2 h-4 w-4" /> Clock out
-            </>
-          ) : (
-            <>
-              <Play className="mr-2 h-4 w-4" /> Clock in
-            </>
-          )}
-        </Button>
+        {isClockedIn && totalBreakSeconds > 0 && (
+          <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+            Break time today:{" "}
+            <span className="font-mono-data text-foreground">
+              {breakDurationLabel(totalBreakSeconds)}
+            </span>
+            {(breaksQ.data?.length ?? 0) > 0 &&
+              ` across ${breaksQ.data!.length} break${breaksQ.data!.length > 1 ? "s" : ""}`}
+          </p>
+        )}
       </div>
 
       {/* Status line — compact single-row form, no longer a full card block */}
@@ -219,8 +326,9 @@ export function ConsultantHome() {
         </form>
       </div>
 
-      {/* Quick figures — ledger strip, matches admin dashboard's stat treatment */}
-      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-3 lg:grid-cols-5 sm:divide-x sm:divide-y-0">
+      {/* Quick figures — ledger strip, matches admin dashboard's stat treatment.
+          Ticket counts are workspace-wide (Open / Ongoing / Done), not just this user's. */}
+      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-3 lg:grid-cols-6 sm:divide-x sm:divide-y-0">
         <QuickCell
           to="/leave"
           icon={<CalendarDays className="h-3.5 w-3.5" />}
@@ -234,6 +342,13 @@ export function ConsultantHome() {
         />
         <QuickCell
           to="/tickets"
+          icon={<CircleDot className="h-3.5 w-3.5" />}
+          label="Open tickets"
+          value={summaryQ.data?.openTickets ?? "—"}
+          sub="not yet started"
+        />
+        <QuickCell
+          to="/tickets"
           icon={<TicketCheck className="h-3.5 w-3.5" />}
           label="Ongoing tickets"
           value={summaryQ.data?.ongoingTickets ?? "—"}
@@ -242,9 +357,9 @@ export function ConsultantHome() {
         <QuickCell
           to="/tickets"
           icon={<Ticket className="h-3.5 w-3.5" />}
-          label="Pending tickets"
-          value={summaryQ.data?.pendingTickets ?? "—"}
-          sub="not yet started"
+          label="Done tickets"
+          value={summaryQ.data?.doneTickets ?? "—"}
+          sub="completed"
         />
         <QuickCell
           to="/messages"
