@@ -31,7 +31,6 @@ import { Button } from "@/components/ui/button";
 
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Time Tracking", url: "/time", icon: Clock },
   { title: "Leave & Holidays", url: "/leave", icon: CalendarDays },
   { title: "Messages", url: "/messages", icon: MessageSquare },
   { title: "Email", url: "/email", icon: Mail },
@@ -46,6 +45,12 @@ export function AppSidebar() {
   const { user, role, signOut } = useAuth();
 
   const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
+
+  const navItems = [
+    items[0],
+    ...(role !== "admin" ? [{ title: "Time Tracking", url: "/time", icon: Clock }] : []),
+    ...items.slice(1),
+  ];
 
   return (
     <Sidebar collapsible="icon">
@@ -72,7 +77,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => {
+              {navItems.map((item) => {
                 const active = pathname === item.url || pathname.startsWith(item.url + "/");
                 return (
                   <SidebarMenuItem key={item.title}>
