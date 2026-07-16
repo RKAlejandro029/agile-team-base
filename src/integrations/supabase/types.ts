@@ -182,7 +182,9 @@ export type Database = {
           created_at: string;
           end_date: string;
           id: string;
+          is_emergency: boolean;
           leave_type: Database["public"]["Enums"]["leave_type"];
+          medical_certificate_provided: boolean;
           reason: string | null;
           reviewed_at: string | null;
           reviewed_by: string | null;
@@ -194,7 +196,9 @@ export type Database = {
           created_at?: string;
           end_date: string;
           id?: string;
+          is_emergency?: boolean;
           leave_type: Database["public"]["Enums"]["leave_type"];
+          medical_certificate_provided?: boolean;
           reason?: string | null;
           reviewed_at?: string | null;
           reviewed_by?: string | null;
@@ -206,7 +210,9 @@ export type Database = {
           created_at?: string;
           end_date?: string;
           id?: string;
+          is_emergency?: boolean;
           leave_type?: Database["public"]["Enums"]["leave_type"];
+          medical_certificate_provided?: boolean;
           reason?: string | null;
           reviewed_at?: string | null;
           reviewed_by?: string | null;
@@ -397,7 +403,15 @@ export type Database = {
     Enums: {
       app_role: "admin" | "consultant";
       leave_status: "pending" | "approved" | "rejected";
-      leave_type: "vacation" | "sick" | "personal";
+      leave_type:
+        | "vacation"
+        | "sick"
+        | "personal"
+        | "birthday"
+        | "maternity"
+        | "paternity"
+        | "lieu"
+        | "solo_parent";
       ticket_priority: "low" | "medium" | "high" | "urgent";
       ticket_status: "open" | "in_progress" | "done";
     };
@@ -523,7 +537,16 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "consultant"],
       leave_status: ["pending", "approved", "rejected"],
-      leave_type: ["vacation", "sick", "personal"],
+      leave_type: [
+        "vacation",
+        "sick",
+        "personal",
+        "birthday",
+        "maternity",
+        "paternity",
+        "lieu",
+        "solo_parent",
+      ],
       ticket_priority: ["low", "medium", "high", "urgent"],
       ticket_status: ["open", "in_progress", "done"],
     },
