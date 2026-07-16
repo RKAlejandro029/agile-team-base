@@ -33,10 +33,19 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { useState } from "react";
-import { format } from "date-fns";
+import { format, isSameDay } from "date-fns";
 import { toast } from "sonner";
-import { Check, X, Plus, AlertTriangle, FileWarning } from "lucide-react";
+import {
+  Check,
+  X,
+  Plus,
+  AlertTriangle,
+  FileWarning,
+  CalendarDays as CalendarIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { leaveTypeLabels, type LeaveType } from "@/lib/leave-types";
 
@@ -50,6 +59,18 @@ const MEDICAL_CERT_THRESHOLD_DAYS = 3;
 // Statutory, qualifying-event leave — governed by their own laws (RA 11210,
 // RA 8187, RA 8972), not the standard advance-notice/medical-cert rules above.
 const STATUTORY_TYPES: LeaveType[] = ["maternity", "paternity", "solo_parent"];
+
+// 'personal' is a legacy enum value kept only for old records — not offered
+// when filing new requests, since the Handbook has no separate Personal Leave.
+const FILEABLE_TYPES: LeaveType[] = [
+  "vacation",
+  "sick",
+  "birthday",
+  "lieu",
+  "maternity",
+  "paternity",
+  "solo_parent",
+];
 
 const leaveTypeHints: Partial<Record<LeaveType, string>> = {
   vacation:
@@ -105,8 +126,7 @@ function LeavePage() {
   const [open, setOpen] = useState(false);
   const [holidayOpen, setHolidayOpen] = useState(false);
   const [leaveType, setLeaveType] = useState<LeaveType>("vacation");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [selectedDates, setSelectedDates] = useState<Date[]>([]);
   const [reason, setReason] = useState("");
   const [isEmergency, setIsEmergency] = useState(false);
   const [medCertProvided, setMedCertProvided] = useState(false);
@@ -143,37 +163,45 @@ function LeavePage() {
 
   // Live validation for the filing form, so the employee sees the policy rule
   // before submitting instead of finding out from a rejection later.
-  const noticeDays = startDate ? weekdaysNotice(new Date(), new Date(startDate)) : null;
-  const durationDays =
-    startDate && endDate ? weekdaysBetweenInclusive(new Date(startDate), new Date(endDate)) : null;
+  const sortedDates = [...selectedDates].sort((a, b) => a.getTime() - b.getTime());
+  const earliestDate = sortedDates[0] ?? null;
+  const noticeDays = earliestDate ? weekdaysNotice(new Date(), earliestDate) : null;
+  const durationDays = selectedDates.length || null;
   const needsAdvanceNotice = ADVANCE_NOTICE_TYPES.includes(leaveType);
   const isLateFiling =
     needsAdvanceNotice && noticeDays !== null && noticeDays < ADVANCE_NOTICE_DAYS && !isEmergency;
   const needsMedCert =
     leaveType === "sick" && durationDays !== null && durationDays > MEDICAL_CERT_THRESHOLD_DAYS;
-  const canSubmit = !isLateFiling && (!needsMedCert || medCertProvided);
+  const canSubmit = selectedDates.length > 0 && !isLateFiling && (!needsMedCert || medCertProvided);
 
   const createRequest = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("leave_requests").insert({
-        user_id: user!.id,
-        leave_type: leaveType,
-        start_date: startDate,
-        end_date: endDate,
-        reason,
-        is_emergency: isEmergency,
-        medical_certificate_provided: medCertProvided,
-        is_bulk_schedule: leaveType === "vacation" ? isBulkSchedule : false,
+      const rows = selectedDates.map((d) => {
+        const iso = format(d, "yyyy-MM-dd");
+        return {
+          user_id: user!.id,
+          leave_type: leaveType,
+          start_date: iso,
+          end_date: iso,
+          reason,
+          is_emergency: isEmergency,
+          medical_certificate_provided: medCertProvided,
+          is_bulk_schedule: leaveType === "vacation" ? isBulkSchedule : false,
+        };
       });
+      const { error } = await supabase.from("leave_requests").insert(rows);
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Leave request submitted");
+      toast.success(
+        selectedDates.length > 1
+          ? `${selectedDates.length} leave days submitted`
+          : "Leave request submitted",
+      );
       qc.invalidateQueries({ queryKey: ["leave-requests"] });
       setOpen(false);
       setReason("");
-      setStartDate("");
-      setEndDate("");
+      setSelectedDates([]);
       setIsEmergency(false);
       setMedCertProvided(false);
       setIsBulkSchedule(new Date().getMonth() === 0);
@@ -266,6 +294,7 @@ function LeavePage() {
           onOpenChange={(o) => {
             setOpen(o);
             if (!o) {
+              setSelectedDates([]);
               setIsEmergency(false);
               setMedCertProvided(false);
               setIsBulkSchedule(new Date().getMonth() === 0);
@@ -303,7 +332,7 @@ function LeavePage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(leaveTypeLabels) as LeaveType[]).map((t) => (
+                    {FILEABLE_TYPES.map((t) => (
                       <SelectItem key={t} value={t}>
                         {leaveTypeLabels[t]}
                       </SelectItem>
@@ -314,25 +343,51 @@ function LeavePage() {
                   <p className="text-xs text-muted-foreground">{leaveTypeHints[leaveType]}</p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Start date</Label>
-                  <Input
-                    type="date"
-                    required
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>End date</Label>
-                  <Input
-                    type="date"
-                    required
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label>Dates</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start font-normal"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {selectedDates.length === 0
+                        ? "Select one or more days"
+                        : `${selectedDates.length} day${selectedDates.length > 1 ? "s" : ""} selected`}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="multiple"
+                      selected={selectedDates}
+                      onSelect={(dates) => setSelectedDates(dates ?? [])}
+                      disabled={[{ dayOfWeek: [0, 6] }, { before: new Date() }]}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <p className="text-xs text-muted-foreground">
+                  Pick any combination of working days — they don't need to be consecutive. Weekends
+                  aren't selectable since they're not working days.
+                </p>
+                {sortedDates.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {sortedDates.map((d) => (
+                      <button
+                        key={d.toISOString()}
+                        type="button"
+                        onClick={() =>
+                          setSelectedDates((prev) => prev.filter((x) => !isSameDay(x, d)))
+                        }
+                        className="flex items-center gap-1 rounded-full border bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        {format(d, "EEE, MMM d")}
+                        <X className="h-3 w-3" />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               {leaveType === "vacation" && (
                 <div className="space-y-2">
@@ -418,7 +473,11 @@ function LeavePage() {
                 className="w-full"
                 disabled={createRequest.isPending || !canSubmit}
               >
-                {isLateFiling ? "Check the emergency box to submit" : "Submit"}
+                {selectedDates.length === 0
+                  ? "Select at least one date"
+                  : isLateFiling
+                    ? "Check the emergency box to submit"
+                    : `Submit ${selectedDates.length > 1 ? `${selectedDates.length} days` : ""}`.trim()}
               </Button>
             </form>
           </DialogContent>
@@ -426,53 +485,55 @@ function LeavePage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {balancesQ.data?.map((b) => {
-          const remaining = Number(b.total_days) - Number(b.used_days);
-          const vacationUsage =
-            b.leave_type === "vacation"
-              ? (requestsQ.data ?? []).filter(
-                  (r) =>
-                    r.leave_type === "vacation" &&
-                    r.user_id === user?.id &&
-                    (r.status === "approved" || r.status === "pending"),
-                )
-              : null;
-          const bulkUsed = vacationUsage
-            ?.filter((r) => r.is_bulk_schedule)
-            .reduce(
-              (sum, r) =>
-                sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
-              0,
-            );
-          const silUsed = vacationUsage
-            ?.filter((r) => !r.is_bulk_schedule)
-            .reduce(
-              (sum, r) =>
-                sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
-              0,
-            );
-          return (
-            <Card key={b.id}>
-              <CardContent className="p-4">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                  {leaveTypeLabels[b.leave_type]}
-                </p>
-                <p className="text-2xl font-semibold">
-                  {remaining}
-                  <span className="text-sm text-muted-foreground font-normal">
-                    {" "}
-                    / {b.total_days} days
-                  </span>
-                </p>
-                {b.leave_type === "vacation" && (
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {bulkUsed ?? 0}/10 scheduled · {silUsed ?? 0}/5 SIL used (filed or pending)
+        {balancesQ.data
+          ?.filter((b) => b.leave_type !== "personal")
+          .map((b) => {
+            const remaining = Number(b.total_days) - Number(b.used_days);
+            const vacationUsage =
+              b.leave_type === "vacation"
+                ? (requestsQ.data ?? []).filter(
+                    (r) =>
+                      r.leave_type === "vacation" &&
+                      r.user_id === user?.id &&
+                      (r.status === "approved" || r.status === "pending"),
+                  )
+                : null;
+            const bulkUsed = vacationUsage
+              ?.filter((r) => r.is_bulk_schedule)
+              .reduce(
+                (sum, r) =>
+                  sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
+                0,
+              );
+            const silUsed = vacationUsage
+              ?.filter((r) => !r.is_bulk_schedule)
+              .reduce(
+                (sum, r) =>
+                  sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
+                0,
+              );
+            return (
+              <Card key={b.id}>
+                <CardContent className="p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                    {leaveTypeLabels[b.leave_type]}
                   </p>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+                  <p className="text-2xl font-semibold">
+                    {remaining}
+                    <span className="text-sm text-muted-foreground font-normal">
+                      {" "}
+                      / {b.total_days} days
+                    </span>
+                  </p>
+                  {b.leave_type === "vacation" && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {bulkUsed ?? 0}/10 scheduled · {silUsed ?? 0}/5 SIL used (filed or pending)
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
       </div>
 
       <Tabs defaultValue="requests">
@@ -540,8 +601,9 @@ function LeavePage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            {format(new Date(r.start_date), "MMM d")} –{" "}
-                            {format(new Date(r.end_date), "MMM d, yyyy")}
+                            {r.start_date === r.end_date
+                              ? format(new Date(r.start_date), "MMM d, yyyy")
+                              : `${format(new Date(r.start_date), "MMM d")} – ${format(new Date(r.end_date), "MMM d, yyyy")}`}
                           </TableCell>
                           <TableCell className="text-muted-foreground text-sm max-w-xs truncate">
                             {r.reason || "—"}
