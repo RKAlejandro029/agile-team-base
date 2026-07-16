@@ -388,6 +388,19 @@ export type Database = {
           id: string;
         }[];
       };
+      get_team_leave: {
+        Args: {
+          from_date: string;
+          to_date: string;
+        };
+        Returns: {
+          user_id: string;
+          full_name: string;
+          leave_type: Database["public"]["Enums"]["leave_type"];
+          start_date: string;
+          end_date: string;
+        }[];
+      };
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"];

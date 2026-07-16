@@ -38,9 +38,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { Check, X, Plus, AlertTriangle, FileWarning } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Database } from "@/integrations/supabase/types";
-
-type LeaveType = Database["public"]["Enums"]["leave_type"];
+import { leaveTypeLabels, type LeaveType } from "@/lib/leave-types";
 
 // Leave types requiring 5 working days advance notice, per the Leave Benefits
 // Policy ("except in cases of emergency or unforeseen circumstances").
@@ -49,17 +47,6 @@ const ADVANCE_NOTICE_DAYS = 5;
 // Sick leave over this many days requires a medical certificate, per the
 // Disciplinary Action Policy.
 const MEDICAL_CERT_THRESHOLD_DAYS = 3;
-
-const leaveTypeLabels: Record<LeaveType, string> = {
-  vacation: "Vacation",
-  sick: "Sick",
-  birthday: "Birthday",
-  lieu: "Lieu",
-  maternity: "Maternity",
-  paternity: "Paternity",
-  solo_parent: "Solo parent",
-  personal: "Personal",
-};
 
 // Weekday-only counts — matches how leave entitlements are actually consumed.
 function weekdaysBetweenInclusive(start: Date, end: Date) {
