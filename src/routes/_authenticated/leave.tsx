@@ -47,6 +47,24 @@ const ADVANCE_NOTICE_DAYS = 5;
 // Sick leave over this many days requires a medical certificate, per the
 // Disciplinary Action Policy.
 const MEDICAL_CERT_THRESHOLD_DAYS = 3;
+// Statutory, qualifying-event leave — governed by their own laws (RA 11210,
+// RA 8187, RA 8972), not the standard advance-notice/medical-cert rules above.
+const STATUTORY_TYPES: LeaveType[] = ["maternity", "paternity", "solo_parent"];
+
+const leaveTypeHints: Partial<Record<LeaveType, string>> = {
+  vacation:
+    "15 days/year. 10 must be scheduled by January (single block or staggered); the remaining 5 are SIL, usable anytime.",
+  sick: "15 days/year. Notify your head ASAP; a medical certificate is required past 3 consecutive days.",
+  birthday:
+    "1 day/year, filed at the start of the year with your Vacation Leave. Must fall on or near your birthday.",
+  lieu: "Compensatory leave, used at your manager's discretion.",
+  maternity:
+    "Up to 105 days paid (RA 11210). Requires supporting documents — HR will confirm your exact entitlement.",
+  paternity: "7 days paid for married male employees (RA 8187). Requires supporting documents.",
+  solo_parent:
+    "7 working days/year for qualified solo parents (RA 8972). Requires a Solo Parent ID on file.",
+  personal: "Legacy leave type — prefer Vacation (SIL) where possible.",
+};
 
 // Weekday-only counts — matches how leave entitlements are actually consumed.
 function weekdaysBetweenInclusive(start: Date, end: Date) {
@@ -92,6 +110,7 @@ function LeavePage() {
   const [reason, setReason] = useState("");
   const [isEmergency, setIsEmergency] = useState(false);
   const [medCertProvided, setMedCertProvided] = useState(false);
+  const [isBulkSchedule, setIsBulkSchedule] = useState(() => new Date().getMonth() === 0);
   const [holidayName, setHolidayName] = useState("");
   const [holidayDate, setHolidayDate] = useState("");
 
@@ -144,6 +163,7 @@ function LeavePage() {
         reason,
         is_emergency: isEmergency,
         medical_certificate_provided: medCertProvided,
+        is_bulk_schedule: leaveType === "vacation" ? isBulkSchedule : false,
       });
       if (error) throw error;
     },
@@ -156,6 +176,7 @@ function LeavePage() {
       setEndDate("");
       setIsEmergency(false);
       setMedCertProvided(false);
+      setIsBulkSchedule(new Date().getMonth() === 0);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -247,6 +268,7 @@ function LeavePage() {
             if (!o) {
               setIsEmergency(false);
               setMedCertProvided(false);
+              setIsBulkSchedule(new Date().getMonth() === 0);
             }
           }}
         >
@@ -269,7 +291,14 @@ function LeavePage() {
             >
               <div className="space-y-2">
                 <Label>Type</Label>
-                <Select value={leaveType} onValueChange={(v) => setLeaveType(v as LeaveType)}>
+                <Select
+                  value={leaveType}
+                  onValueChange={(v) => {
+                    setLeaveType(v as LeaveType);
+                    setIsEmergency(false);
+                    setMedCertProvided(false);
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -281,6 +310,9 @@ function LeavePage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {leaveTypeHints[leaveType] && (
+                  <p className="text-xs text-muted-foreground">{leaveTypeHints[leaveType]}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
@@ -302,12 +334,47 @@ function LeavePage() {
                   />
                 </div>
               </div>
+              {leaveType === "vacation" && (
+                <div className="space-y-2">
+                  <Label>Which bucket does this count against?</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsBulkSchedule(true)}
+                      className={cn(
+                        "rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                        isBulkSchedule ? "border-primary bg-primary/5" : "text-muted-foreground",
+                      )}
+                    >
+                      <span className="block font-medium text-foreground">Annual schedule</span>
+                      Part of your 10 pre-planned days
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsBulkSchedule(false)}
+                      className={cn(
+                        "rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                        !isBulkSchedule ? "border-primary bg-primary/5" : "text-muted-foreground",
+                      )}
+                    >
+                      <span className="block font-medium text-foreground">SIL</span>
+                      One of your 5 flexible days
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
-                <Label>Reason</Label>
+                <Label>
+                  {STATUTORY_TYPES.includes(leaveType) ? "Supporting document reference" : "Reason"}
+                </Label>
                 <Textarea
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Optional"
+                  placeholder={
+                    STATUTORY_TYPES.includes(leaveType)
+                      ? "e.g. medical certificate number, birth certificate reference, Solo Parent ID number"
+                      : "Optional"
+                  }
                 />
               </div>
 
@@ -320,8 +387,7 @@ function LeavePage() {
                       : "text-muted-foreground",
                   )}
                 >
-                  {leaveTypeLabels[leaveType]} leave needs {ADVANCE_NOTICE_DAYS} working days'
-                  notice.
+                  Needs {ADVANCE_NOTICE_DAYS} working days' notice.
                   {noticeDays !== null &&
                     ` You're filing with ${noticeDays} working day${noticeDays === 1 ? "" : "s"} notice.`}
                   <label className="mt-2 flex items-center gap-2 font-normal text-foreground">
@@ -362,6 +428,29 @@ function LeavePage() {
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {balancesQ.data?.map((b) => {
           const remaining = Number(b.total_days) - Number(b.used_days);
+          const vacationUsage =
+            b.leave_type === "vacation"
+              ? (requestsQ.data ?? []).filter(
+                  (r) =>
+                    r.leave_type === "vacation" &&
+                    r.user_id === user?.id &&
+                    (r.status === "approved" || r.status === "pending"),
+                )
+              : null;
+          const bulkUsed = vacationUsage
+            ?.filter((r) => r.is_bulk_schedule)
+            .reduce(
+              (sum, r) =>
+                sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
+              0,
+            );
+          const silUsed = vacationUsage
+            ?.filter((r) => !r.is_bulk_schedule)
+            .reduce(
+              (sum, r) =>
+                sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
+              0,
+            );
           return (
             <Card key={b.id}>
               <CardContent className="p-4">
@@ -375,6 +464,11 @@ function LeavePage() {
                     / {b.total_days} days
                   </span>
                 </p>
+                {b.leave_type === "vacation" && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {bulkUsed ?? 0}/10 scheduled · {silUsed ?? 0}/5 SIL used (filed or pending)
+                  </p>
+                )}
               </CardContent>
             </Card>
           );
@@ -437,7 +531,14 @@ function LeavePage() {
                               {p?.full_name || p?.email}
                             </TableCell>
                           )}
-                          <TableCell>{leaveTypeLabels[r.leave_type]}</TableCell>
+                          <TableCell>
+                            {leaveTypeLabels[r.leave_type]}
+                            {r.leave_type === "vacation" && (
+                              <span className="ml-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                ({r.is_bulk_schedule ? "Annual" : "SIL"})
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell>
                             {format(new Date(r.start_date), "MMM d")} –{" "}
                             {format(new Date(r.end_date), "MMM d, yyyy")}

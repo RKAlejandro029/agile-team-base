@@ -182,6 +182,7 @@ export type Database = {
           created_at: string;
           end_date: string;
           id: string;
+          is_bulk_schedule: boolean;
           is_emergency: boolean;
           leave_type: Database["public"]["Enums"]["leave_type"];
           medical_certificate_provided: boolean;
@@ -196,6 +197,7 @@ export type Database = {
           created_at?: string;
           end_date: string;
           id?: string;
+          is_bulk_schedule?: boolean;
           is_emergency?: boolean;
           leave_type: Database["public"]["Enums"]["leave_type"];
           medical_certificate_provided?: boolean;
@@ -210,6 +212,7 @@ export type Database = {
           created_at?: string;
           end_date?: string;
           id?: string;
+          is_bulk_schedule?: boolean;
           is_emergency?: boolean;
           leave_type?: Database["public"]["Enums"]["leave_type"];
           medical_certificate_provided?: boolean;
