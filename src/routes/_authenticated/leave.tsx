@@ -137,14 +137,22 @@ function LeavePage() {
   const requestsQ = useQuery({
     queryKey: ["leave-requests", role, user?.id],
     queryFn: async () => {
-      let q = supabase
-        .from("leave_requests")
-        .select("*, profiles!leave_requests_user_id_fkey(full_name, email)")
-        .order("created_at", { ascending: false });
+      let q = supabase.from("leave_requests").select("*").order("created_at", { ascending: false });
       if (role !== "admin") q = q.eq("user_id", user!.id);
       const { data, error } = await q;
       if (error) throw error;
-      return data ?? [];
+      const rows = data ?? [];
+      if (rows.length === 0) return [];
+      // profiles isn't embedded via FK here because leave_requests.user_id
+      // references auth.users, not profiles directly — PostgREST can't
+      // resolve that as an embed, so fetch profiles separately and merge.
+      const userIds = [...new Set(rows.map((r) => r.user_id))];
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIds);
+      const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
+      return rows.map((r) => ({ ...r, profiles: byId.get(r.user_id) ?? null }));
     },
     enabled: !!user,
   });

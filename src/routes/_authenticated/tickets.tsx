@@ -63,11 +63,23 @@ function TicketsPage() {
   const ticketsQ = useQuery({
     queryKey: ["tickets", user?.id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("tickets")
-        .select("*, creator:profiles!tickets_created_by_fkey(full_name, email)")
+        .select("*")
         .order("updated_at", { ascending: false });
-      return data ?? [];
+      if (error) throw error;
+      const rows = data ?? [];
+      if (rows.length === 0) return [];
+      // creator isn't embedded via FK here because tickets.created_by
+      // references auth.users, not profiles directly — PostgREST can't
+      // resolve that as an embed, so fetch profiles separately and merge.
+      const userIds = [...new Set(rows.map((r) => r.created_by))];
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIds);
+      const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
+      return rows.map((r) => ({ ...r, creator: byId.get(r.created_by) ?? null }));
     },
     enabled: !!user,
   });
@@ -76,12 +88,21 @@ function TicketsPage() {
     queryKey: ["ticket-updates", detailId],
     queryFn: async () => {
       if (!detailId) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ticket_updates")
-        .select("*, profiles!ticket_updates_user_id_fkey(full_name, email)")
+        .select("*")
         .eq("ticket_id", detailId)
         .order("created_at");
-      return data ?? [];
+      if (error) throw error;
+      const rows = data ?? [];
+      if (rows.length === 0) return [];
+      const userIds = [...new Set(rows.map((r) => r.user_id))];
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIds);
+      const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
+      return rows.map((r) => ({ ...r, profiles: byId.get(r.user_id) ?? null }));
     },
     enabled: !!detailId,
   });
