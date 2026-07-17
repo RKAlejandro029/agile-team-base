@@ -263,6 +263,8 @@ export type Database = {
           id: string;
           outlook_connected: boolean;
           updated_at: string;
+          work_days: number[];
+          work_start_time: string;
         };
         Insert: {
           avatar_url?: string | null;
@@ -274,6 +276,8 @@ export type Database = {
           id: string;
           outlook_connected?: boolean;
           updated_at?: string;
+          work_days?: number[];
+          work_start_time?: string;
         };
         Update: {
           avatar_url?: string | null;
@@ -283,6 +287,8 @@ export type Database = {
           email?: string;
           full_name?: string;
           id?: string;
+          work_days?: number[];
+          work_start_time?: string;
           outlook_connected?: boolean;
           updated_at?: string;
         };

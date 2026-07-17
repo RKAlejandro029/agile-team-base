@@ -36,10 +36,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Shield, User as UserIcon, UserPlus, Trash2 } from "lucide-react";
+import { Shield, User as UserIcon, UserPlus, Trash2, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { createUserFn, deleteUserFn } from "@/functions/team.functions";
 import { DEFAULT_NEW_USER_PASSWORD } from "@/config/team";
+import { cn } from "@/lib/utils";
+import { DAY_LABELS, DISPLAY_ORDER } from "@/lib/leave-types";
+
+function formatSchedule(workDays: number[], startTime: string) {
+  const days = DISPLAY_ORDER.filter((d) => workDays.includes(d)).map((d) => DAY_LABELS[d]);
+  const dayLabel = days.length === 0 ? "No working days set" : days.join(", ");
+  const time = startTime?.slice(0, 5) || "09:00";
+  const [h, m] = time.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${dayLabel} · ${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
 
 export const Route = createFileRoute("/_authenticated/team")({
   component: TeamPage,
@@ -54,6 +66,14 @@ function TeamPage() {
   const [newPassword, setNewPassword] = useState(DEFAULT_NEW_USER_PASSWORD);
   const [newFullName, setNewFullName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<{
+    id: string;
+    label: string;
+    work_days: number[];
+    work_start_time: string;
+  } | null>(null);
+  const [draftDays, setDraftDays] = useState<number[]>([]);
+  const [draftTime, setDraftTime] = useState("09:00");
 
   const dataQ = useQuery({
     queryKey: ["team", role],
@@ -102,6 +122,24 @@ function TeamPage() {
       setNewEmail("");
       setNewPassword(DEFAULT_NEW_USER_PASSWORD);
       setNewFullName("");
+      qc.invalidateQueries({ queryKey: ["team"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateSchedule = useMutation({
+    mutationFn: async () => {
+      if (!scheduleTarget) return;
+      if (draftDays.length === 0) throw new Error("Pick at least one working day.");
+      const { error } = await supabase
+        .from("profiles")
+        .update({ work_days: draftDays, work_start_time: `${draftTime}:00` })
+        .eq("id", scheduleTarget.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Schedule updated");
+      setScheduleTarget(null);
       qc.invalidateQueries({ queryKey: ["team"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -218,6 +256,7 @@ function TeamPage() {
               <TableRow>
                 <TableHead>Member</TableHead>
                 <TableHead>Department</TableHead>
+                <TableHead>Schedule</TableHead>
                 <TableHead>Roles</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -245,6 +284,25 @@ function TeamPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">{p.department || "—"}</TableCell>
+                    <TableCell>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScheduleTarget({
+                            id: p.id,
+                            label: p.full_name || p.email,
+                            work_days: p.work_days,
+                            work_start_time: p.work_start_time,
+                          });
+                          setDraftDays(p.work_days);
+                          setDraftTime(p.work_start_time?.slice(0, 5) || "09:00");
+                        }}
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline underline-offset-2"
+                      >
+                        <CalendarClock className="h-3 w-3" />
+                        {formatSchedule(p.work_days, p.work_start_time)}
+                      </button>
+                    </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
                         {userRoles.map((r) => (
@@ -295,6 +353,70 @@ function TeamPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={!!scheduleTarget} onOpenChange={(o) => !o && setScheduleTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{scheduleTarget?.label}'s schedule</DialogTitle>
+            <DialogDescription>
+              Sets which days count as working days and their expected start time. This directly
+              controls which dates they can select when filing leave — weekends for their schedule
+              won't be selectable, whatever days you pick here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Working days</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {DISPLAY_ORDER.map((d) => {
+                  const active = draftDays.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() =>
+                        setDraftDays((prev) =>
+                          prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d],
+                        )
+                      }
+                      className={cn(
+                        "h-10 w-14 rounded-md border text-xs font-medium transition-colors",
+                        active
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:bg-accent/40",
+                      )}
+                    >
+                      {DAY_LABELS[d]}
+                    </button>
+                  );
+                })}
+              </div>
+              {draftDays.length === 0 && (
+                <p className="text-xs text-destructive">Pick at least one working day.</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="schedule-start-time">Start time</Label>
+              <Input
+                id="schedule-start-time"
+                type="time"
+                value={draftTime}
+                onChange={(e) => setDraftTime(e.target.value)}
+                className="w-40"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              disabled={updateSchedule.isPending}
+              onClick={() => updateSchedule.mutate()}
+            >
+              {updateSchedule.isPending ? "Saving…" : "Save schedule"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

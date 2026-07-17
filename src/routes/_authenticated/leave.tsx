@@ -47,7 +47,7 @@ import {
   CalendarDays as CalendarIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { leaveTypeLabels, type LeaveType } from "@/lib/leave-types";
+import { leaveTypeLabels, DAY_LABELS, DISPLAY_ORDER, type LeaveType } from "@/lib/leave-types";
 
 // Leave types requiring 5 working days advance notice, per the Leave Benefits
 // Policy ("except in cases of emergency or unforeseen circumstances").
@@ -87,22 +87,25 @@ const leaveTypeHints: Partial<Record<LeaveType, string>> = {
   personal: "Legacy leave type — prefer Vacation (SIL) where possible.",
 };
 
-// Weekday-only counts — matches how leave entitlements are actually consumed.
-function weekdaysBetweenInclusive(start: Date, end: Date) {
+const DEFAULT_WORK_DAYS = [1, 2, 3, 4, 5]; // Mon-Fri fallback
+
+// Counts days that fall on one of workDays (0=Sun..6=Sat) — matches how leave
+// entitlements are actually consumed against a consultant's own schedule,
+// which admins can customize away from the standard Mon-Fri week.
+function weekdaysBetweenInclusive(start: Date, end: Date, workDays: number[] = DEFAULT_WORK_DAYS) {
   let count = 0;
   const cur = new Date(start);
   cur.setHours(0, 0, 0, 0);
   const last = new Date(end);
   last.setHours(0, 0, 0, 0);
   while (cur <= last) {
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6) count++;
+    if (workDays.includes(cur.getDay())) count++;
     cur.setDate(cur.getDate() + 1);
   }
   return count;
 }
 
-function weekdaysNotice(from: Date, to: Date) {
+function weekdaysNotice(from: Date, to: Date, workDays: number[] = DEFAULT_WORK_DAYS) {
   let count = 0;
   const cur = new Date(from);
   cur.setHours(0, 0, 0, 0);
@@ -110,8 +113,7 @@ function weekdaysNotice(from: Date, to: Date) {
   end.setHours(0, 0, 0, 0);
   while (cur < end) {
     cur.setDate(cur.getDate() + 1);
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6) count++;
+    if (workDays.includes(cur.getDay())) count++;
   }
   return count;
 }
@@ -146,16 +148,35 @@ function LeavePage() {
       // profiles isn't embedded via FK here because leave_requests.user_id
       // references auth.users, not profiles directly — PostgREST can't
       // resolve that as an embed, so fetch profiles separately and merge.
+      // work_days comes along too, so late-filing checks use each person's
+      // own schedule rather than assuming Mon-Fri for everyone.
       const userIds = [...new Set(rows.map((r) => r.user_id))];
       const { data: profiles } = await supabase
         .from("profiles")
-        .select("id, full_name, email")
+        .select("id, full_name, email, work_days")
         .in("id", userIds);
       const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
       return rows.map((r) => ({ ...r, profiles: byId.get(r.user_id) ?? null }));
     },
     enabled: !!user,
   });
+
+  // The signed-in user's own schedule — drives which dates are selectable
+  // when filing and how notice/duration are counted for them.
+  const profileQ = useQuery({
+    queryKey: ["my-schedule", user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("work_days, work_start_time")
+        .eq("id", user!.id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!user,
+  });
+  const myWorkDays = profileQ.data?.work_days ?? DEFAULT_WORK_DAYS;
+  const myOffDays = [0, 1, 2, 3, 4, 5, 6].filter((d) => !myWorkDays.includes(d));
 
   const balancesQ = useQuery({
     queryKey: ["leave-balances", user?.id],
@@ -173,7 +194,7 @@ function LeavePage() {
   // before submitting instead of finding out from a rejection later.
   const sortedDates = [...selectedDates].sort((a, b) => a.getTime() - b.getTime());
   const earliestDate = sortedDates[0] ?? null;
-  const noticeDays = earliestDate ? weekdaysNotice(new Date(), earliestDate) : null;
+  const noticeDays = earliestDate ? weekdaysNotice(new Date(), earliestDate, myWorkDays) : null;
   const durationDays = selectedDates.length || null;
   const needsAdvanceNotice = ADVANCE_NOTICE_TYPES.includes(leaveType);
   const isLateFiling =
@@ -242,16 +263,20 @@ function LeavePage() {
       // solo parent) often won't have a pre-existing balance row — that's fine,
       // it's skipped silently rather than erroring the whole approval.
       if (status === "approved") {
-        const { data: balance } = await supabase
-          .from("leave_balances")
-          .select("id, used_days")
-          .eq("user_id", request.user_id)
-          .eq("leave_type", request.leave_type)
-          .maybeSingle();
+        const [{ data: balance }, { data: profile }] = await Promise.all([
+          supabase
+            .from("leave_balances")
+            .select("id, used_days")
+            .eq("user_id", request.user_id)
+            .eq("leave_type", request.leave_type)
+            .maybeSingle(),
+          supabase.from("profiles").select("work_days").eq("id", request.user_id).maybeSingle(),
+        ]);
         if (balance) {
           const days = weekdaysBetweenInclusive(
             new Date(request.start_date),
             new Date(request.end_date),
+            profile?.work_days ?? DEFAULT_WORK_DAYS,
           );
           const { error: balErr } = await supabase
             .from("leave_balances")
@@ -296,6 +321,23 @@ function LeavePage() {
               ? "Approve time off and manage the company calendar."
               : "Request time off and see your balance."}
           </p>
+          {role !== "admin" && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Your schedule:{" "}
+              {DISPLAY_ORDER.filter((d) => myWorkDays.includes(d))
+                .map((d) => DAY_LABELS[d])
+                .join(", ")}
+              {profileQ.data?.work_start_time &&
+                ` · starts ${(() => {
+                  const [h, m] = profileQ.data.work_start_time.slice(0, 5).split(":").map(Number);
+                  const period = h >= 12 ? "PM" : "AM";
+                  const h12 = h % 12 === 0 ? 12 : h % 12;
+                  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+                })()}`}
+              {" — "}
+              <span className="italic">contact an admin to change it</span>
+            </p>
+          )}
         </div>
         <Dialog
           open={open}
@@ -371,13 +413,19 @@ function LeavePage() {
                       mode="multiple"
                       selected={selectedDates}
                       onSelect={(dates) => setSelectedDates(dates ?? [])}
-                      disabled={[{ dayOfWeek: [0, 6] }, { before: new Date() }]}
+                      disabled={[{ dayOfWeek: myOffDays }, { before: new Date() }]}
                     />
                   </PopoverContent>
                 </Popover>
                 <p className="text-xs text-muted-foreground">
-                  Pick any combination of working days — they don't need to be consecutive. Weekends
-                  aren't selectable since they're not working days.
+                  Pick any combination of working days — they don't need to be consecutive. Your
+                  working days are{" "}
+                  {DISPLAY_ORDER.filter((d) => myWorkDays.includes(d))
+                    .map((d) => DAY_LABELS[d])
+                    .join(", ")}
+                  {myOffDays.length > 0 &&
+                    ` — ${myOffDays.map((d) => DAY_LABELS[d]).join("/")} aren't selectable`}
+                  .
                 </p>
                 {sortedDates.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
@@ -510,14 +558,24 @@ function LeavePage() {
               ?.filter((r) => r.is_bulk_schedule)
               .reduce(
                 (sum, r) =>
-                  sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
+                  sum +
+                  weekdaysBetweenInclusive(
+                    new Date(r.start_date),
+                    new Date(r.end_date),
+                    myWorkDays,
+                  ),
                 0,
               );
             const silUsed = vacationUsage
               ?.filter((r) => !r.is_bulk_schedule)
               .reduce(
                 (sum, r) =>
-                  sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date)),
+                  sum +
+                  weekdaysBetweenInclusive(
+                    new Date(r.start_date),
+                    new Date(r.end_date),
+                    myWorkDays,
+                  ),
                 0,
               );
             return (
@@ -573,16 +631,25 @@ function LeavePage() {
                   <TableBody>
                     {requestsQ.data?.map((r) => {
                       const p = (
-                        r as unknown as { profiles: { full_name: string; email: string } | null }
+                        r as unknown as {
+                          profiles: {
+                            full_name: string;
+                            email: string;
+                            work_days: number[];
+                          } | null;
+                        }
                       ).profiles;
+                      const rWorkDays = p?.work_days ?? DEFAULT_WORK_DAYS;
 
                       const rNoticeDays = weekdaysNotice(
                         new Date(r.created_at),
                         new Date(r.start_date),
+                        rWorkDays,
                       );
                       const rDurationDays = weekdaysBetweenInclusive(
                         new Date(r.start_date),
                         new Date(r.end_date),
+                        rWorkDays,
                       );
                       const rLateFiling =
                         ADVANCE_NOTICE_TYPES.includes(r.leave_type) &&
