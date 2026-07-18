@@ -8,6 +8,33 @@ export type Database = {
   };
   public: {
     Tables: {
+      activity_log: {
+        Row: {
+          action: string;
+          actor_id: string | null;
+          detail: string | null;
+          id: string;
+          occurred_at: string;
+          target_user_id: string | null;
+        };
+        Insert: {
+          action: string;
+          actor_id?: string | null;
+          detail?: string | null;
+          id?: string;
+          occurred_at?: string;
+          target_user_id?: string | null;
+        };
+        Update: {
+          action?: string;
+          actor_id?: string | null;
+          detail?: string | null;
+          id?: string;
+          occurred_at?: string;
+          target_user_id?: string | null;
+        };
+        Relationships: [];
+      };
       attendance_breaks: {
         Row: {
           attendance_log_id: string;
@@ -423,7 +450,7 @@ export type Database = {
       };
     };
     Enums: {
-      app_role: "admin" | "consultant";
+      app_role: "admin" | "consultant" | "ceo";
       leave_status: "pending" | "approved" | "rejected";
       leave_type:
         | "vacation"
@@ -557,7 +584,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "consultant"],
+      app_role: ["admin", "consultant", "ceo"],
       leave_status: ["pending", "approved", "rejected"],
       leave_type: [
         "vacation",

@@ -123,7 +123,7 @@ export const Route = createFileRoute("/_authenticated/leave")({
 });
 
 function LeavePage() {
-  const { user, role } = useAuth();
+  const { user, role, isAdmin, isCeo } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [holidayOpen, setHolidayOpen] = useState(false);
@@ -140,7 +140,7 @@ function LeavePage() {
     queryKey: ["leave-requests", role, user?.id],
     queryFn: async () => {
       let q = supabase.from("leave_requests").select("*").order("created_at", { ascending: false });
-      if (role !== "admin") q = q.eq("user_id", user!.id);
+      if (!isAdmin) q = q.eq("user_id", user!.id);
       const { data, error } = await q;
       if (error) throw error;
       const rows = data ?? [];
@@ -317,11 +317,13 @@ function LeavePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Leave & holidays</h1>
           <p className="text-sm text-muted-foreground">
-            {role === "admin"
+            {role === "ceo"
               ? "Approve time off and manage the company calendar."
-              : "Request time off and see your balance."}
+              : role === "admin"
+                ? "Approve time off, and request your own."
+                : "Request time off and see your balance."}
           </p>
-          {role !== "admin" && (
+          {!isCeo && (
             <p className="mt-1 text-xs text-muted-foreground">
               Your schedule:{" "}
               {DISPLAY_ORDER.filter((d) => myWorkDays.includes(d))
@@ -339,268 +341,277 @@ function LeavePage() {
             </p>
           )}
         </div>
-        <Dialog
-          open={open}
-          onOpenChange={(o) => {
-            setOpen(o);
-            if (!o) {
-              setSelectedDates([]);
-              setIsEmergency(false);
-              setMedCertProvided(false);
-              setIsBulkSchedule(new Date().getMonth() === 0);
-            }
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Request leave
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>New leave request</DialogTitle>
-            </DialogHeader>
-            <form
-              className="space-y-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (canSubmit) createRequest.mutate();
-              }}
-            >
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select
-                  value={leaveType}
-                  onValueChange={(v) => {
-                    setLeaveType(v as LeaveType);
-                    setIsEmergency(false);
-                    setMedCertProvided(false);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FILEABLE_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {leaveTypeLabels[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {leaveTypeHints[leaveType] && (
-                  <p className="text-xs text-muted-foreground">{leaveTypeHints[leaveType]}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label>Dates</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full justify-start font-normal"
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {selectedDates.length === 0
-                        ? "Select one or more days"
-                        : `${selectedDates.length} day${selectedDates.length > 1 ? "s" : ""} selected`}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="multiple"
-                      selected={selectedDates}
-                      onSelect={(dates) => setSelectedDates(dates ?? [])}
-                      disabled={[{ dayOfWeek: myOffDays }, { before: new Date() }]}
-                    />
-                  </PopoverContent>
-                </Popover>
-                <p className="text-xs text-muted-foreground">
-                  Pick any combination of working days — they don't need to be consecutive. Your
-                  working days are{" "}
-                  {DISPLAY_ORDER.filter((d) => myWorkDays.includes(d))
-                    .map((d) => DAY_LABELS[d])
-                    .join(", ")}
-                  {myOffDays.length > 0 &&
-                    ` — ${myOffDays.map((d) => DAY_LABELS[d]).join("/")} aren't selectable`}
-                  .
-                </p>
-                {sortedDates.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {sortedDates.map((d) => (
-                      <button
-                        key={d.toISOString()}
-                        type="button"
-                        onClick={() =>
-                          setSelectedDates((prev) => prev.filter((x) => !isSameDay(x, d)))
-                        }
-                        className="flex items-center gap-1 rounded-full border bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        {format(d, "EEE, MMM d")}
-                        <X className="h-3 w-3" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {leaveType === "vacation" && (
+        {!isCeo && (
+          <Dialog
+            open={open}
+            onOpenChange={(o) => {
+              setOpen(o);
+              if (!o) {
+                setSelectedDates([]);
+                setIsEmergency(false);
+                setMedCertProvided(false);
+                setIsBulkSchedule(new Date().getMonth() === 0);
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Request leave
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>New leave request</DialogTitle>
+              </DialogHeader>
+              <form
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (canSubmit) createRequest.mutate();
+                }}
+              >
                 <div className="space-y-2">
-                  <Label>Which bucket does this count against?</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsBulkSchedule(true)}
-                      className={cn(
-                        "rounded-md border px-3 py-2 text-left text-xs transition-colors",
-                        isBulkSchedule ? "border-primary bg-primary/5" : "text-muted-foreground",
-                      )}
-                    >
-                      <span className="block font-medium text-foreground">Annual schedule</span>
-                      Part of your 10 pre-planned days
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsBulkSchedule(false)}
-                      className={cn(
-                        "rounded-md border px-3 py-2 text-left text-xs transition-colors",
-                        !isBulkSchedule ? "border-primary bg-primary/5" : "text-muted-foreground",
-                      )}
-                    >
-                      <span className="block font-medium text-foreground">SIL</span>
-                      One of your 5 flexible days
-                    </button>
-                  </div>
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label>
-                  {STATUTORY_TYPES.includes(leaveType) ? "Supporting document reference" : "Reason"}
-                </Label>
-                <Textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder={
-                    STATUTORY_TYPES.includes(leaveType)
-                      ? "e.g. medical certificate number, birth certificate reference, Solo Parent ID number"
-                      : "Optional"
-                  }
-                />
-              </div>
-
-              {needsAdvanceNotice && (
-                <div
-                  className={cn(
-                    "rounded-md border px-3 py-2 text-xs",
-                    isLateFiling
-                      ? "border-destructive/40 bg-destructive/5 text-destructive"
-                      : "text-muted-foreground",
+                  <Label>Type</Label>
+                  <Select
+                    value={leaveType}
+                    onValueChange={(v) => {
+                      setLeaveType(v as LeaveType);
+                      setIsEmergency(false);
+                      setMedCertProvided(false);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FILEABLE_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {leaveTypeLabels[t]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {leaveTypeHints[leaveType] && (
+                    <p className="text-xs text-muted-foreground">{leaveTypeHints[leaveType]}</p>
                   )}
-                >
-                  Needs {ADVANCE_NOTICE_DAYS} working days' notice.
-                  {noticeDays !== null &&
-                    ` You're filing with ${noticeDays} working day${noticeDays === 1 ? "" : "s"} notice.`}
-                  <label className="mt-2 flex items-center gap-2 font-normal text-foreground">
-                    <Checkbox checked={isEmergency} onCheckedChange={(c) => setIsEmergency(!!c)} />
-                    This is an emergency / unforeseen circumstance
-                  </label>
                 </div>
-              )}
-
-              {leaveType === "sick" &&
-                durationDays !== null &&
-                durationDays > MEDICAL_CERT_THRESHOLD_DAYS && (
-                  <div className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-foreground">
-                    Sick leave over {MEDICAL_CERT_THRESHOLD_DAYS} days requires a medical
-                    certificate from a licensed physician.
-                    <label className="mt-2 flex items-center gap-2 font-normal">
-                      <Checkbox
-                        checked={medCertProvided}
-                        onCheckedChange={(c) => setMedCertProvided(!!c)}
+                <div className="space-y-2">
+                  <Label>Dates</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-start font-normal"
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {selectedDates.length === 0
+                          ? "Select one or more days"
+                          : `${selectedDates.length} day${selectedDates.length > 1 ? "s" : ""} selected`}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="multiple"
+                        selected={selectedDates}
+                        onSelect={(dates) => setSelectedDates(dates ?? [])}
+                        disabled={[{ dayOfWeek: myOffDays }, { before: new Date() }]}
                       />
-                      I have (or will submit) a medical certificate for this absence
+                    </PopoverContent>
+                  </Popover>
+                  <p className="text-xs text-muted-foreground">
+                    Pick any combination of working days — they don't need to be consecutive. Your
+                    working days are{" "}
+                    {DISPLAY_ORDER.filter((d) => myWorkDays.includes(d))
+                      .map((d) => DAY_LABELS[d])
+                      .join(", ")}
+                    {myOffDays.length > 0 &&
+                      ` — ${myOffDays.map((d) => DAY_LABELS[d]).join("/")} aren't selectable`}
+                    .
+                  </p>
+                  {sortedDates.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {sortedDates.map((d) => (
+                        <button
+                          key={d.toISOString()}
+                          type="button"
+                          onClick={() =>
+                            setSelectedDates((prev) => prev.filter((x) => !isSameDay(x, d)))
+                          }
+                          className="flex items-center gap-1 rounded-full border bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          {format(d, "EEE, MMM d")}
+                          <X className="h-3 w-3" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {leaveType === "vacation" && (
+                  <div className="space-y-2">
+                    <Label>Which bucket does this count against?</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsBulkSchedule(true)}
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                          isBulkSchedule ? "border-primary bg-primary/5" : "text-muted-foreground",
+                        )}
+                      >
+                        <span className="block font-medium text-foreground">Annual schedule</span>
+                        Part of your 10 pre-planned days
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsBulkSchedule(false)}
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                          !isBulkSchedule ? "border-primary bg-primary/5" : "text-muted-foreground",
+                        )}
+                      >
+                        <span className="block font-medium text-foreground">SIL</span>
+                        One of your 5 flexible days
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>
+                    {STATUTORY_TYPES.includes(leaveType)
+                      ? "Supporting document reference"
+                      : "Reason"}
+                  </Label>
+                  <Textarea
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder={
+                      STATUTORY_TYPES.includes(leaveType)
+                        ? "e.g. medical certificate number, birth certificate reference, Solo Parent ID number"
+                        : "Optional"
+                    }
+                  />
+                </div>
+
+                {needsAdvanceNotice && (
+                  <div
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-xs",
+                      isLateFiling
+                        ? "border-destructive/40 bg-destructive/5 text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    Needs {ADVANCE_NOTICE_DAYS} working days' notice.
+                    {noticeDays !== null &&
+                      ` You're filing with ${noticeDays} working day${noticeDays === 1 ? "" : "s"} notice.`}
+                    <label className="mt-2 flex items-center gap-2 font-normal text-foreground">
+                      <Checkbox
+                        checked={isEmergency}
+                        onCheckedChange={(c) => setIsEmergency(!!c)}
+                      />
+                      This is an emergency / unforeseen circumstance
                     </label>
                   </div>
                 )}
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={createRequest.isPending || !canSubmit}
-              >
-                {selectedDates.length === 0
-                  ? "Select at least one date"
-                  : isLateFiling
-                    ? "Check the emergency box to submit"
-                    : `Submit ${selectedDates.length > 1 ? `${selectedDates.length} days` : ""}`.trim()}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+                {leaveType === "sick" &&
+                  durationDays !== null &&
+                  durationDays > MEDICAL_CERT_THRESHOLD_DAYS && (
+                    <div className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-foreground">
+                      Sick leave over {MEDICAL_CERT_THRESHOLD_DAYS} days requires a medical
+                      certificate from a licensed physician.
+                      <label className="mt-2 flex items-center gap-2 font-normal">
+                        <Checkbox
+                          checked={medCertProvided}
+                          onCheckedChange={(c) => setMedCertProvided(!!c)}
+                        />
+                        I have (or will submit) a medical certificate for this absence
+                      </label>
+                    </div>
+                  )}
+
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={createRequest.isPending || !canSubmit}
+                >
+                  {selectedDates.length === 0
+                    ? "Select at least one date"
+                    : isLateFiling
+                      ? "Check the emergency box to submit"
+                      : `Submit ${selectedDates.length > 1 ? `${selectedDates.length} days` : ""}`.trim()}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {balancesQ.data
-          ?.filter((b) => b.leave_type !== "personal")
-          .map((b) => {
-            const remaining = Number(b.total_days) - Number(b.used_days);
-            const vacationUsage =
-              b.leave_type === "vacation"
-                ? (requestsQ.data ?? []).filter(
-                    (r) =>
-                      r.leave_type === "vacation" &&
-                      r.user_id === user?.id &&
-                      (r.status === "approved" || r.status === "pending"),
-                  )
-                : null;
-            const bulkUsed = vacationUsage
-              ?.filter((r) => r.is_bulk_schedule)
-              .reduce(
-                (sum, r) =>
-                  sum +
-                  weekdaysBetweenInclusive(
-                    new Date(r.start_date),
-                    new Date(r.end_date),
-                    myWorkDays,
-                  ),
-                0,
-              );
-            const silUsed = vacationUsage
-              ?.filter((r) => !r.is_bulk_schedule)
-              .reduce(
-                (sum, r) =>
-                  sum +
-                  weekdaysBetweenInclusive(
-                    new Date(r.start_date),
-                    new Date(r.end_date),
-                    myWorkDays,
-                  ),
-                0,
-              );
-            return (
-              <Card key={b.id}>
-                <CardContent className="p-4">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                    {leaveTypeLabels[b.leave_type]}
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {remaining}
-                    <span className="text-sm text-muted-foreground font-normal">
-                      {" "}
-                      / {b.total_days} days
-                    </span>
-                  </p>
-                  {b.leave_type === "vacation" && (
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {bulkUsed ?? 0}/10 scheduled · {silUsed ?? 0}/5 SIL used (filed or pending)
+      {!isCeo && (
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {balancesQ.data
+            ?.filter((b) => b.leave_type !== "personal")
+            .map((b) => {
+              const remaining = Number(b.total_days) - Number(b.used_days);
+              const vacationUsage =
+                b.leave_type === "vacation"
+                  ? (requestsQ.data ?? []).filter(
+                      (r) =>
+                        r.leave_type === "vacation" &&
+                        r.user_id === user?.id &&
+                        (r.status === "approved" || r.status === "pending"),
+                    )
+                  : null;
+              const bulkUsed = vacationUsage
+                ?.filter((r) => r.is_bulk_schedule)
+                .reduce(
+                  (sum, r) =>
+                    sum +
+                    weekdaysBetweenInclusive(
+                      new Date(r.start_date),
+                      new Date(r.end_date),
+                      myWorkDays,
+                    ),
+                  0,
+                );
+              const silUsed = vacationUsage
+                ?.filter((r) => !r.is_bulk_schedule)
+                .reduce(
+                  (sum, r) =>
+                    sum +
+                    weekdaysBetweenInclusive(
+                      new Date(r.start_date),
+                      new Date(r.end_date),
+                      myWorkDays,
+                    ),
+                  0,
+                );
+              return (
+                <Card key={b.id}>
+                  <CardContent className="p-4">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                      {leaveTypeLabels[b.leave_type]}
                     </p>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-      </div>
+                    <p className="text-2xl font-semibold">
+                      {remaining}
+                      <span className="text-sm text-muted-foreground font-normal">
+                        {" "}
+                        / {b.total_days} days
+                      </span>
+                    </p>
+                    {b.leave_type === "vacation" && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {bulkUsed ?? 0}/10 scheduled · {silUsed ?? 0}/5 SIL used (filed or pending)
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+        </div>
+      )}
 
       <Tabs defaultValue="requests">
         <TabsList>
@@ -612,7 +623,7 @@ function LeavePage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                {role === "admin" ? "All requests" : "Your requests"}
+                {isAdmin ? "All requests" : "Your requests"}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -620,12 +631,12 @@ function LeavePage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {role === "admin" && <TableHead>Consultant</TableHead>}
+                      {isAdmin && <TableHead>Consultant</TableHead>}
                       <TableHead>Type</TableHead>
                       <TableHead>Dates</TableHead>
                       <TableHead>Reason</TableHead>
                       <TableHead>Status</TableHead>
-                      {role === "admin" && <TableHead className="text-right">Action</TableHead>}
+                      {isAdmin && <TableHead className="text-right">Action</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -662,7 +673,7 @@ function LeavePage() {
 
                       return (
                         <TableRow key={r.id}>
-                          {role === "admin" && (
+                          {isAdmin && (
                             <TableCell className="font-medium">
                               {p?.full_name || p?.email}
                             </TableCell>
@@ -697,7 +708,7 @@ function LeavePage() {
                               >
                                 {r.status}
                               </Badge>
-                              {role === "admin" && r.status === "pending" && rLateFiling && (
+                              {isAdmin && r.status === "pending" && rLateFiling && (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
@@ -709,7 +720,7 @@ function LeavePage() {
                                   </TooltipContent>
                                 </Tooltip>
                               )}
-                              {role === "admin" && r.status === "pending" && rMissingCert && (
+                              {isAdmin && r.status === "pending" && rMissingCert && (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <FileWarning className="h-3.5 w-3.5 text-warning" />
@@ -722,7 +733,7 @@ function LeavePage() {
                               )}
                             </div>
                           </TableCell>
-                          {role === "admin" && (
+                          {isAdmin && (
                             <TableCell className="text-right">
                               {r.status === "pending" && (
                                 <div className="flex gap-1 justify-end">
@@ -754,7 +765,7 @@ function LeavePage() {
                     {requestsQ.data?.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={role === "admin" ? 6 : 4}
+                          colSpan={isAdmin ? 6 : 4}
                           className="text-center text-muted-foreground py-8"
                         >
                           No requests.
@@ -772,7 +783,7 @@ function LeavePage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">Company holidays</CardTitle>
-              {role === "admin" && (
+              {isAdmin && (
                 <Dialog open={holidayOpen} onOpenChange={setHolidayOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm" variant="outline">

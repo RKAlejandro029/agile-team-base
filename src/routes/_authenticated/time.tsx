@@ -14,14 +14,14 @@ export const Route = createFileRoute("/_authenticated/time")({
 });
 
 function TimePage() {
-  const { role } = useAuth();
+  const { isCeo } = useAuth();
 
-  if (role === "admin") {
+  if (isCeo) {
     return (
       <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
         <p className="text-sm text-muted-foreground">
-          Time tracking is a consultant-only page — clock-in/out isn't something admins log. To see
-          who's active, on break, or on leave right now, head back to the{" "}
+          Time tracking doesn't apply to the CEO role — clock-in/out isn't something you need to
+          log. To see who's active, on break, or on leave right now, head back to the{" "}
           <a href="/dashboard" className="underline underline-offset-2 hover:text-foreground">
             team overview
           </a>

@@ -36,7 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Shield, User as UserIcon, UserPlus, Trash2, CalendarClock } from "lucide-react";
+import { Shield, User as UserIcon, UserPlus, Trash2, CalendarClock, Crown } from "lucide-react";
 import { toast } from "sonner";
 import { createUserFn, deleteUserFn } from "@/functions/team.functions";
 import { DEFAULT_NEW_USER_PASSWORD } from "@/config/team";
@@ -58,7 +58,7 @@ export const Route = createFileRoute("/_authenticated/team")({
 });
 
 function TeamPage() {
-  const { role, user } = useAuth();
+  const { role, isAdmin, isCeo, user } = useAuth();
   const qc = useQueryClient();
 
   const [addOpen, setAddOpen] = useState(false);
@@ -84,7 +84,7 @@ function TeamPage() {
       ]);
       return { profiles: profiles.data ?? [], roles: roles.data ?? [] };
     },
-    enabled: role === "admin",
+    enabled: isAdmin,
   });
 
   const toggleAdmin = useMutation({
@@ -160,7 +160,7 @@ function TeamPage() {
     },
   });
 
-  if (role !== "admin") {
+  if (!isAdmin) {
     return (
       <div className="p-6">
         <p className="text-muted-foreground">Admins only.</p>
@@ -266,7 +266,8 @@ function TeamPage() {
                 const userRoles = dataQ
                   .data!.roles.filter((r) => r.user_id === p.id)
                   .map((r) => r.role);
-                const isAdmin = userRoles.includes("admin");
+                const rowIsAdmin = userRoles.includes("admin");
+                const rowIsCeo = userRoles.includes("ceo");
                 const isSelf = p.id === user?.id;
                 return (
                   <TableRow key={p.id}>
@@ -308,10 +309,12 @@ function TeamPage() {
                         {userRoles.map((r) => (
                           <Badge
                             key={r}
-                            variant={r === "admin" ? "default" : "secondary"}
+                            variant={r === "admin" || r === "ceo" ? "default" : "secondary"}
                             className="capitalize"
                           >
-                            {r === "admin" ? (
+                            {r === "ceo" ? (
+                              <Crown className="h-3 w-3 mr-1" />
+                            ) : r === "admin" ? (
                               <Shield className="h-3 w-3 mr-1" />
                             ) : (
                               <UserIcon className="h-3 w-3 mr-1" />
@@ -324,15 +327,17 @@ function TeamPage() {
                     <TableCell className="text-right">
                       {!isSelf && (
                         <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              toggleAdmin.mutate({ userId: p.id, makeAdmin: !isAdmin })
-                            }
-                          >
-                            {isAdmin ? "Revoke admin" : "Make admin"}
-                          </Button>
+                          {isCeo && !rowIsCeo && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                toggleAdmin.mutate({ userId: p.id, makeAdmin: !rowIsAdmin })
+                              }
+                            >
+                              {rowIsAdmin ? "Revoke admin" : "Make admin"}
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"

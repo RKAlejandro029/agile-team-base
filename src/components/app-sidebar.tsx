@@ -10,6 +10,7 @@ import {
   LogOut,
   Users,
   KeyRound,
+  History,
 } from "lucide-react";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import {
@@ -42,13 +43,14 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { user, role, signOut } = useAuth();
+  const { user, role, isAdmin, isCeo, signOut } = useAuth();
 
   const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
 
+  // Everyone clocks in except the CEO — admins are employees too here.
   const navItems = [
     items[0],
-    ...(role !== "admin" ? [{ title: "Time Tracking", url: "/time", icon: Clock }] : []),
+    ...(!isCeo ? [{ title: "Time Tracking", url: "/time", icon: Clock }] : []),
     ...items.slice(1),
   ];
 
@@ -65,7 +67,7 @@ export function AppSidebar() {
                 Fintreas
               </span>
               <span className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
-                {role === "admin" ? "Admin Console" : "Consultant"}
+                {role === "ceo" ? "CEO" : role === "admin" ? "Admin Console" : "Consultant"}
               </span>
             </div>
           )}
@@ -90,12 +92,22 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 );
               })}
-              {role === "admin" && (
+              {isAdmin && (
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={pathname === "/team"}>
                     <Link to="/team">
                       <Users className="h-4 w-4" />
                       <span>Team</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+              {isCeo && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/history"}>
+                    <Link to="/history">
+                      <History className="h-4 w-4" />
+                      <span>History</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

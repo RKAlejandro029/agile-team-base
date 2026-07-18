@@ -10,7 +10,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 });
 
 function DashboardPage() {
-  const { role, user } = useAuth();
+  const { role, isAdmin, user } = useAuth();
   // Ensure profile row exists (for edge case where trigger raced)
   useQuery({
     queryKey: ["profile-ping", user?.id],
@@ -29,5 +29,5 @@ function DashboardPage() {
       </div>
     );
   }
-  return role === "admin" ? <AdminDashboard /> : <ConsultantHome />;
+  return isAdmin ? <AdminDashboard /> : <ConsultantHome />;
 }

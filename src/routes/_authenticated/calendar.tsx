@@ -26,7 +26,6 @@ import {
   format,
   isSameDay,
   isSameMonth,
-  isWithinInterval,
   startOfMonth,
   endOfMonth,
   startOfWeek,
@@ -43,7 +42,7 @@ export const Route = createFileRoute("/_authenticated/calendar")({
 });
 
 function CalendarPage() {
-  const { user, role } = useAuth();
+  const { user, isAdmin } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -112,21 +111,28 @@ function CalendarPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // leave start_date/end_date come back as plain "yyyy-MM-dd" strings (DATE
+  // columns). Comparing them as Date objects is a trap: new Date("2026-07-25")
+  // parses as UTC midnight, which isn't the same instant as a grid day's local
+  // midnight — so exact interval matches silently failed for single-day leave.
+  // String comparison on ISO dates sorts identically to chronological order,
+  // so it sidesteps timezones entirely.
+  const dayKey = (d: Date) => format(d, "yyyy-MM-dd");
+
   const eventsForDay = (day: Date) =>
     (eventsQ.data ?? []).filter((e) => isSameDay(new Date(e.start_time), day));
-  const leaveForDay = (day: Date) =>
-    (leaveQ.data ?? []).filter((l) =>
-      isWithinInterval(day, { start: new Date(l.start_date), end: new Date(l.end_date) }),
-    );
+  const leaveForDay = (day: Date) => {
+    const key = dayKey(day);
+    return (leaveQ.data ?? []).filter((l) => l.start_date <= key && l.end_date >= key);
+  };
 
   // Grouped per person for the month, for the "who's out this month" list —
   // consecutive days for the same person/type collapse into one range already,
   // since that's how the leave request itself was filed.
+  const gridStartKey = dayKey(gridStart);
+  const gridEndKey = dayKey(gridEnd);
   const monthLeave = (leaveQ.data ?? []).filter(
-    (l) =>
-      isWithinInterval(new Date(l.start_date), { start: gridStart, end: gridEnd }) ||
-      isWithinInterval(new Date(l.end_date), { start: gridStart, end: gridEnd }) ||
-      (new Date(l.start_date) <= gridStart && new Date(l.end_date) >= gridEnd),
+    (l) => l.start_date <= gridEndKey && l.end_date >= gridStartKey,
   );
 
   const detailEvents = dayDetail ? eventsForDay(dayDetail) : [];
@@ -138,7 +144,7 @@ function CalendarPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Calendar</h1>
           <p className="text-sm text-muted-foreground">
-            {role === "admin" ? "Team-wide meeting schedule." : "Your meetings and invites."}
+            {isAdmin ? "Team-wide meeting schedule." : "Your meetings and invites."}
           </p>
         </div>
         <div className="flex gap-2">

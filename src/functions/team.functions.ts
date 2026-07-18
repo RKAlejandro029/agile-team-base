@@ -17,12 +17,15 @@ export const createUserFn = createServerFn({ method: "POST" })
     // client.server.ts is a *.server.ts module, safe to import lazily inside a handler.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    // Re-verify the caller is an admin server-side. Do not trust anything from the client.
+    // Re-verify the caller is an admin or the CEO server-side. Do not trust
+    // anything from the client. New users always land as plain 'consultant'
+    // (handled by the handle_new_user trigger) — this endpoint never lets
+    // anyone create an admin or CEO account directly.
     const { data: callerRoles, error: roleError } = await supabaseAdmin
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId)
-      .eq("role", "admin");
+      .in("role", ["admin", "ceo"]);
 
     if (roleError) {
       throw new Error("Could not verify permissions");
@@ -46,6 +49,13 @@ export const createUserFn = createServerFn({ method: "POST" })
     // on this insert into auth.users — it creates the profiles row and the default
     // 'consultant' user_roles row, so nothing else needs to happen here.
 
+    await supabaseAdmin.from("activity_log").insert({
+      actor_id: context.userId,
+      action: "user_created",
+      target_user_id: created.user?.id,
+      detail: data.email,
+    });
+
     return { userId: created.user?.id, email: created.user?.email };
   });
 
@@ -59,12 +69,13 @@ export const deleteUserFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    // Re-verify the caller is an admin server-side. Do not trust anything from the client.
+    // Re-verify the caller is an admin or the CEO server-side. Do not trust
+    // anything from the client.
     const { data: callerRoles, error: roleError } = await supabaseAdmin
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId)
-      .eq("role", "admin");
+      .in("role", ["admin", "ceo"]);
 
     if (roleError) {
       throw new Error("Could not verify permissions");
@@ -73,7 +84,7 @@ export const deleteUserFn = createServerFn({ method: "POST" })
       throw new Error("Forbidden: admin role required");
     }
 
-    // Don't let an admin delete their own account through this flow — that's how
+    // Don't let anyone delete their own account through this flow — that's how
     // you end up locked out with no admin left. Self-removal, if ever needed,
     // should be a deliberate separate action.
     if (data.userId === context.userId) {
@@ -86,6 +97,12 @@ export const deleteUserFn = createServerFn({ method: "POST" })
     if (error) {
       throw new Error(error.message);
     }
+
+    await supabaseAdmin.from("activity_log").insert({
+      actor_id: context.userId,
+      action: "user_deleted",
+      target_user_id: data.userId,
+    });
 
     return { userId: data.userId };
   });
