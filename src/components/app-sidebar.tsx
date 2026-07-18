@@ -47,10 +47,11 @@ export function AppSidebar() {
 
   const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
 
-  // Everyone clocks in except the CEO — admins are employees too here.
+  // Same tabs for everyone — CEO isn't required to clock in or file leave,
+  // but the tabs themselves stay consistent with what Admin sees.
   const navItems = [
     items[0],
-    ...(!isCeo ? [{ title: "Time Tracking", url: "/time", icon: Clock }] : []),
+    { title: "Time Tracking", url: "/time", icon: Clock },
     ...items.slice(1),
   ];
 

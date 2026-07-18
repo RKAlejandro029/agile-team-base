@@ -35,7 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { format, isSameDay } from "date-fns";
 import { toast } from "sonner";
 import {
@@ -125,6 +125,22 @@ export const Route = createFileRoute("/_authenticated/leave")({
 function LeavePage() {
   const { user, role, isAdmin, isCeo } = useAuth();
   const qc = useQueryClient();
+
+  // Live updates: a new filing or an approve/reject shows up immediately for
+  // anyone with this page open — admin sees new requests land without
+  // refreshing, and a consultant sees their own get approved in real time.
+  useEffect(() => {
+    const channel = supabase
+      .channel("leave-requests-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "leave_requests" }, () => {
+        qc.invalidateQueries({ queryKey: ["leave-requests"] });
+        qc.invalidateQueries({ queryKey: ["leave-balances"] });
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [qc]);
   const [open, setOpen] = useState(false);
   const [holidayOpen, setHolidayOpen] = useState(false);
   const [leaveType, setLeaveType] = useState<LeaveType>("vacation");

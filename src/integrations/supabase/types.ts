@@ -430,6 +430,7 @@ export type Database = {
           to_date: string;
         };
         Returns: {
+          id: string;
           user_id: string;
           full_name: string;
           leave_type: Database["public"]["Enums"]["leave_type"];

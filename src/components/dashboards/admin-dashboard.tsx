@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatusBadge, type UserStatus } from "@/components/status-badge";
@@ -19,6 +20,30 @@ interface ConsultantRow {
 }
 
 export function AdminDashboard() {
+  const qc = useQueryClient();
+
+  // Live updates: anyone clocking in/out, starting/ending a break, or filing
+  // leave shows up here immediately — no need to switch tabs or wait for the
+  // 30s poll. Realtime still respects RLS, so this only ever receives rows
+  // this admin could already see via a normal query.
+  useEffect(() => {
+    const channel = supabase
+      .channel("admin-dashboard-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance_logs" }, () =>
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance_breaks" }, () =>
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "leave_requests" }, () =>
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [qc]);
+
   const { data, isLoading } = useQuery({
     queryKey: ["admin-dashboard"],
     queryFn: async () => {

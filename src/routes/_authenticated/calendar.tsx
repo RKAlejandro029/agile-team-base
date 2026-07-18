@@ -266,7 +266,7 @@ function CalendarPage() {
                   <div className="flex-1 space-y-0.5 overflow-hidden">
                     {dayLeave.slice(0, 1).map((l) => (
                       <div
-                        key={`${l.user_id}-${l.start_date}`}
+                        key={l.id}
                         className="flex items-center gap-1 truncate rounded bg-warning/10 px-1 py-0.5 text-[10px] text-warning"
                       >
                         <PlaneTakeoff className="h-2.5 w-2.5 shrink-0" />
@@ -348,10 +348,7 @@ function CalendarPage() {
           <CardContent>
             <div className="divide-y">
               {monthLeave.map((l) => (
-                <div
-                  key={`${l.user_id}-${l.start_date}`}
-                  className="py-2.5 flex items-center justify-between text-sm"
-                >
+                <div key={l.id} className="py-2.5 flex items-center justify-between text-sm">
                   <span className="font-medium">{l.full_name}</span>
                   <span className="text-muted-foreground text-xs">
                     {leaveTypeLabels[l.leave_type]} · {format(new Date(l.start_date), "MMM d")}
@@ -382,10 +379,7 @@ function CalendarPage() {
                 </p>
                 <div className="space-y-1.5">
                   {detailLeave.map((l) => (
-                    <div
-                      key={`${l.user_id}-${l.start_date}`}
-                      className="flex items-center gap-2 text-sm"
-                    >
+                    <div key={l.id} className="flex items-center gap-2 text-sm">
                       <PlaneTakeoff className="h-3.5 w-3.5 text-warning" />
                       {l.full_name}
                       <span className="text-xs text-muted-foreground">
