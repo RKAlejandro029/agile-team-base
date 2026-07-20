@@ -38,6 +38,9 @@ export function AdminDashboard() {
       .on("postgres_changes", { event: "*", schema: "public", table: "leave_requests" }, () =>
         qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
       )
+      .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, () =>
+        qc.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -48,27 +51,42 @@ export function AdminDashboard() {
     queryKey: ["admin-dashboard"],
     queryFn: async () => {
       const today = new Date().toISOString().slice(0, 10);
-      const [profilesRes, rolesRes, attendanceRes, breaksRes, leaveRes, ticketsRes] =
-        await Promise.all([
-          supabase.from("profiles").select("id, full_name, email, department, current_task"),
-          supabase.from("user_roles").select("user_id, role").eq("role", "consultant"),
-          supabase
-            .from("attendance_logs")
-            .select("id, user_id, clock_in, clock_out")
-            .order("clock_in", { ascending: false })
-            .limit(500),
-          supabase
-            .from("attendance_breaks")
-            .select("attendance_log_id, break_end")
-            .is("break_end", null),
-          supabase
-            .from("leave_requests")
-            .select("id, user_id, status, start_date, end_date")
-            .eq("status", "approved")
-            .lte("start_date", today)
-            .gte("end_date", today),
-          supabase.from("tickets").select("id, status").in("status", ["open", "in_progress"]),
-        ]);
+      const [
+        profilesRes,
+        rolesRes,
+        attendanceRes,
+        breaksRes,
+        leaveRes,
+        ticketsRes,
+        allTicketsRes,
+        pendingLeaveRes,
+      ] = await Promise.all([
+        supabase.from("profiles").select("id, full_name, email, department, current_task"),
+        supabase.from("user_roles").select("user_id, role").eq("role", "consultant"),
+        supabase
+          .from("attendance_logs")
+          .select("id, user_id, clock_in, clock_out")
+          .order("clock_in", { ascending: false })
+          .limit(500),
+        supabase
+          .from("attendance_breaks")
+          .select("attendance_log_id, break_end")
+          .is("break_end", null),
+        supabase
+          .from("leave_requests")
+          .select("id, user_id, status, start_date, end_date")
+          .eq("status", "approved")
+          .lte("start_date", today)
+          .gte("end_date", today),
+        supabase.from("tickets").select("id, status").in("status", ["open", "in_progress"]),
+        supabase.from("tickets").select("status"),
+        supabase
+          .from("leave_requests")
+          .select("id, user_id, leave_type, start_date, end_date, created_at")
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(8),
+      ]);
 
       const consultantIds = new Set((rolesRes.data ?? []).map((r) => r.user_id));
       const profiles = (profilesRes.data ?? []).filter((p) => consultantIds.has(p.id));
@@ -109,12 +127,36 @@ export function AdminDashboard() {
         };
       });
 
+      // Resolve names for pending leave rows the same decoupled way — the FK
+      // points to auth.users, not profiles, so PostgREST can't embed it.
+      const pendingRows = pendingLeaveRes.data ?? [];
+      const pendingUserIds = [...new Set(pendingRows.map((r) => r.user_id))];
+      const { data: pendingProfiles } =
+        pendingUserIds.length > 0
+          ? await supabase.from("profiles").select("id, full_name, email").in("id", pendingUserIds)
+          : { data: [] };
+      const pendingById = new Map((pendingProfiles ?? []).map((p) => [p.id, p]));
+      const pendingLeave = pendingRows.map((r) => ({
+        ...r,
+        profile: pendingById.get(r.user_id) ?? null,
+      }));
+
+      const allTickets = allTicketsRes.data ?? [];
+      const doneAllTime = allTickets.filter((t) => t.status === "done").length;
+
       return {
         consultants,
         activeCount: consultants.filter((c) => c.status === "active").length,
         onBreakCount: consultants.filter((c) => c.status === "break").length,
         onLeaveCount: consultants.filter((c) => c.status === "leave").length,
         openTickets: ticketsRes.data?.length ?? 0,
+        pendingLeave,
+        kpi: {
+          ticketCompletionRate:
+            allTickets.length > 0 ? Math.round((doneAllTime / allTickets.length) * 100) : null,
+          ticketsDoneAllTime: doneAllTime,
+          totalTickets: allTickets.length,
+        },
       };
     },
     refetchInterval: 30_000,
@@ -174,6 +216,88 @@ export function AdminDashboard() {
           value={data?.consultants.length ?? "—"}
           tone="muted"
         />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-md border">
+          <div className="flex items-center justify-between border-b px-4 py-3 sm:px-5">
+            <h2 className="font-display text-lg font-medium">Needs approval</h2>
+            {data?.pendingLeave && data.pendingLeave.length > 0 && (
+              <Button asChild size="sm" variant="outline">
+                <Link to="/leave">Review all</Link>
+              </Button>
+            )}
+          </div>
+          <div className="divide-y">
+            {data?.pendingLeave.map((r) => (
+              <Link
+                key={r.id}
+                to="/leave"
+                className="flex items-center justify-between px-4 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-5"
+              >
+                <span className="truncate">
+                  <span className="font-medium">
+                    {r.profile?.full_name || r.profile?.email || "Someone"}
+                  </span>{" "}
+                  <span className="capitalize text-muted-foreground">{r.leave_type}</span>
+                </span>
+                <span className="shrink-0 font-mono-data text-xs text-muted-foreground">
+                  {formatDistanceToNowStrict(new Date(r.created_at))} ago
+                </span>
+              </Link>
+            ))}
+            {data?.pendingLeave.length === 0 && (
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground sm:px-5">
+                Nothing waiting on you.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-md border">
+          <div className="border-b px-4 py-3 sm:px-5">
+            <h2 className="font-display text-lg font-medium">Workforce KPIs</h2>
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-y">
+            <div className="px-4 py-4 sm:px-5">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                Attendance rate
+              </p>
+              <p className="font-mono-data text-2xl text-foreground">
+                {data && data.consultants.length > 0
+                  ? Math.round(
+                      ((data.activeCount + data.onBreakCount) / data.consultants.length) * 100,
+                    )
+                  : 0}
+                %
+              </p>
+            </div>
+            <div className="px-4 py-4 sm:px-5">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                Ticket completion
+              </p>
+              <p className="font-mono-data text-2xl text-foreground">
+                {data?.kpi.ticketCompletionRate ?? 0}%
+              </p>
+            </div>
+            <div className="px-4 py-4 sm:px-5">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                Tickets done (all time)
+              </p>
+              <p className="font-mono-data text-2xl text-foreground">
+                {data?.kpi.ticketsDoneAllTime ?? 0}
+              </p>
+            </div>
+            <div className="px-4 py-4 sm:px-5">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                Total tickets logged
+              </p>
+              <p className="font-mono-data text-2xl text-foreground">
+                {data?.kpi.totalTickets ?? 0}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="rounded-md border">

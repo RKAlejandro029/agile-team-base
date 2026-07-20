@@ -36,12 +36,30 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Shield, User as UserIcon, UserPlus, Trash2, CalendarClock, Crown } from "lucide-react";
+import {
+  Shield,
+  User as UserIcon,
+  UserPlus,
+  Trash2,
+  CalendarClock,
+  Crown,
+  LayoutGrid,
+} from "lucide-react";
 import { toast } from "sonner";
 import { createUserFn, deleteUserFn } from "@/functions/team.functions";
 import { DEFAULT_NEW_USER_PASSWORD } from "@/config/team";
 import { cn } from "@/lib/utils";
 import { DAY_LABELS, DISPLAY_ORDER } from "@/lib/leave-types";
+
+const ALL_TABS = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "time", label: "Time Tracking" },
+  { key: "leave", label: "Leave & Holidays" },
+  { key: "messages", label: "Messages" },
+  { key: "email", label: "Email" },
+  { key: "calendar", label: "Calendar" },
+  { key: "tickets", label: "Tickets" },
+];
 
 function formatSchedule(workDays: number[], startTime: string) {
   const days = DISPLAY_ORDER.filter((d) => workDays.includes(d)).map((d) => DAY_LABELS[d]);
@@ -74,6 +92,8 @@ function TeamPage() {
   } | null>(null);
   const [draftDays, setDraftDays] = useState<number[]>([]);
   const [draftTime, setDraftTime] = useState("09:00");
+  const [tabsTarget, setTabsTarget] = useState<{ id: string; label: string } | null>(null);
+  const [draftTabs, setDraftTabs] = useState<string[]>([]);
 
   const dataQ = useQuery({
     queryKey: ["team", role],
@@ -140,6 +160,24 @@ function TeamPage() {
     onSuccess: () => {
       toast.success("Schedule updated");
       setScheduleTarget(null);
+      qc.invalidateQueries({ queryKey: ["team"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateTabs = useMutation({
+    mutationFn: async () => {
+      if (!tabsTarget) return;
+      if (draftTabs.length === 0) throw new Error("Pick at least one tab.");
+      const { error } = await supabase
+        .from("profiles")
+        .update({ allowed_tabs: draftTabs })
+        .eq("id", tabsTarget.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Tabs updated");
+      setTabsTarget(null);
       qc.invalidateQueries({ queryKey: ["team"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -255,8 +293,8 @@ function TeamPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Member</TableHead>
-                <TableHead>Department</TableHead>
                 <TableHead>Schedule</TableHead>
+                <TableHead>Tabs</TableHead>
                 <TableHead>Roles</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -284,7 +322,6 @@ function TeamPage() {
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{p.department || "—"}</TableCell>
                     <TableCell>
                       <button
                         type="button"
@@ -303,6 +340,28 @@ function TeamPage() {
                         <CalendarClock className="h-3 w-3" />
                         {formatSchedule(p.work_days, p.work_start_time)}
                       </button>
+                    </TableCell>
+                    <TableCell>
+                      {/* Admins can adjust a consultant's tabs; only CEO can adjust
+                          another admin's or the CEO's own tabs. */}
+                      {isCeo || (isAdmin && !rowIsAdmin && !rowIsCeo) ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTabsTarget({ id: p.id, label: p.full_name || p.email });
+                            setDraftTabs(p.allowed_tabs ?? []);
+                          }}
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline underline-offset-2"
+                        >
+                          <LayoutGrid className="h-3 w-3" />
+                          {p.allowed_tabs?.length ?? 0} tabs
+                        </button>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <LayoutGrid className="h-3 w-3" />
+                          {p.allowed_tabs?.length ?? 0} tabs
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
@@ -418,6 +477,54 @@ function TeamPage() {
               onClick={() => updateSchedule.mutate()}
             >
               {updateSchedule.isPending ? "Saving…" : "Save schedule"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!tabsTarget} onOpenChange={(o) => !o && setTabsTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{tabsTarget?.label}'s tabs</DialogTitle>
+            <DialogDescription>
+              Controls which sidebar tabs this person sees. Team, History, and Reports aren't listed
+              here — those follow role (Admin/CEO) automatically and can't be granted this way.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap gap-1.5">
+            {ALL_TABS.map((t) => {
+              const active = draftTabs.includes(t.key);
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() =>
+                    setDraftTabs((prev) =>
+                      prev.includes(t.key) ? prev.filter((x) => x !== t.key) : [...prev, t.key],
+                    )
+                  }
+                  className={cn(
+                    "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                    active
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-accent/40",
+                  )}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+          {draftTabs.length === 0 && (
+            <p className="text-xs text-destructive">Pick at least one tab.</p>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              disabled={updateTabs.isPending}
+              onClick={() => updateTabs.mutate()}
+            >
+              {updateTabs.isPending ? "Saving…" : "Save tabs"}
             </Button>
           </DialogFooter>
         </DialogContent>

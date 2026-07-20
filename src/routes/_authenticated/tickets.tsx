@@ -24,7 +24,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Plus } from "lucide-react";
+import { Plus, UserCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -54,11 +54,23 @@ function TicketsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
+  const [issue, setIssue] = useState("");
+  const [client, setClient] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
+  const [assignedTo, setAssignedTo] = useState<string>("");
   const [filter, setFilter] = useState<Status | "all">("all");
   const [comment, setComment] = useState("");
+
+  // Everyone the ticket could be assigned to. CEO/Admin can hand a ticket to
+  // any consultant (or themselves); a consultant filing one can still assign
+  // it to a colleague or keep it for themselves.
+  const peopleQ = useQuery({
+    queryKey: ["ticket-assignees"],
+    queryFn: async () =>
+      (await supabase.from("profiles").select("id, full_name, email").order("full_name")).data ??
+      [],
+  });
 
   const ticketsQ = useQuery({
     queryKey: ["tickets", user?.id],
@@ -70,16 +82,22 @@ function TicketsPage() {
       if (error) throw error;
       const rows = data ?? [];
       if (rows.length === 0) return [];
-      // creator isn't embedded via FK here because tickets.created_by
-      // references auth.users, not profiles directly — PostgREST can't
-      // resolve that as an embed, so fetch profiles separately and merge.
-      const userIds = [...new Set(rows.map((r) => r.created_by))];
+      // creator/assignee aren't embedded via FK here because tickets.created_by
+      // and .assigned_to reference auth.users, not profiles directly —
+      // PostgREST can't resolve that as an embed, so fetch profiles separately.
+      const userIds = [
+        ...new Set(rows.flatMap((r) => [r.created_by, r.assigned_to]).filter(Boolean)),
+      ] as string[];
       const { data: profiles } = await supabase
         .from("profiles")
         .select("id, full_name, email")
         .in("id", userIds);
       const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
-      return rows.map((r) => ({ ...r, creator: byId.get(r.created_by) ?? null }));
+      return rows.map((r) => ({
+        ...r,
+        creator: byId.get(r.created_by) ?? null,
+        assignee: r.assigned_to ? (byId.get(r.assigned_to) ?? null) : null,
+      }));
     },
     enabled: !!user,
   });
@@ -110,11 +128,12 @@ function TicketsPage() {
   const create = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.from("tickets").insert({
-        title,
+        title: issue,
+        client: client || null,
         description,
         priority,
         created_by: user!.id,
-        assigned_to: user!.id,
+        assigned_to: assignedTo || user!.id,
       });
       if (error) throw error;
     },
@@ -122,9 +141,11 @@ function TicketsPage() {
       toast.success("Ticket created");
       qc.invalidateQueries({ queryKey: ["tickets"] });
       setOpen(false);
-      setTitle("");
+      setIssue("");
+      setClient("");
       setDescription("");
       setPriority("medium");
+      setAssignedTo("");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -202,8 +223,21 @@ function TicketsPage() {
                 }}
               >
                 <div className="space-y-2">
-                  <Label>Title</Label>
-                  <Input required value={title} onChange={(e) => setTitle(e.target.value)} />
+                  <Label>Issue</Label>
+                  <Input
+                    required
+                    value={issue}
+                    onChange={(e) => setIssue(e.target.value)}
+                    placeholder="e.g. Login page throws 500 error"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Client</Label>
+                  <Input
+                    value={client}
+                    onChange={(e) => setClient(e.target.value)}
+                    placeholder="Which client is this for?"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Description</Label>
@@ -211,21 +245,45 @@ function TicketsPage() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     rows={4}
+                    placeholder="What's happening, steps to reproduce, and what's expected instead"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Priority</Label>
-                  <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="urgent">Urgent</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Assign to</Label>
+                    <Select
+                      value={assignedTo || "self"}
+                      onValueChange={(v) => setAssignedTo(v === "self" ? "" : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="self">Myself</SelectItem>
+                        {peopleQ.data
+                          ?.filter((p) => p.id !== user?.id)
+                          .map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.full_name || p.email}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <Button type="submit" className="w-full" disabled={create.isPending}>
                   Create
@@ -237,7 +295,7 @@ function TicketsPage() {
       </div>
 
       {/* Status chips — click to filter, always visible so anyone can see the shape
-          of the team's queue at a glance without opening the dropdown. */}
+          of their queue at a glance without opening the dropdown. */}
       <div className="grid grid-cols-3 divide-x overflow-hidden rounded-md border">
         <StatusChip
           active={filter === "open"}
@@ -266,6 +324,9 @@ function TicketsPage() {
         {filtered.map((t) => {
           const creator = (t as unknown as { creator: { full_name: string; email: string } | null })
             .creator;
+          const assignee = (
+            t as unknown as { assignee: { full_name: string; email: string } | null }
+          ).assignee;
           return (
             <Card
               key={t.id}
@@ -274,7 +335,7 @@ function TicketsPage() {
             >
               <CardContent className="p-4 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
                     <p className="font-medium truncate">{t.title}</p>
                     <Badge
                       className={cn("capitalize", priorityColor[t.priority as Priority])}
@@ -288,12 +349,18 @@ function TicketsPage() {
                     >
                       {t.status.replace("_", " ")}
                     </Badge>
+                    {t.client && (
+                      <span className="text-xs text-muted-foreground">· {t.client}</span>
+                    )}
                   </div>
                   {t.description && (
                     <p className="text-sm text-muted-foreground line-clamp-2">{t.description}</p>
                   )}
-                  <p className="text-xs text-muted-foreground mt-1">
-                    By {creator?.full_name || creator?.email} · Updated{" "}
+                  <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <UserCircle2 className="h-3 w-3" />
+                    {assignee?.full_name || assignee?.email || "Unassigned"}
+                    <span className="mx-1">·</span>
+                    Filed by {creator?.full_name || creator?.email} · Updated{" "}
                     {format(new Date(t.updated_at), "MMM d, h:mm a")}
                   </p>
                 </div>
@@ -326,7 +393,7 @@ function TicketsPage() {
           </SheetHeader>
           {detail && (
             <div className="space-y-4 mt-4">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Badge
                   className={cn("capitalize", priorityColor[detail.priority as Priority])}
                   variant="secondary"
@@ -339,6 +406,7 @@ function TicketsPage() {
                 >
                   {detail.status.replace("_", " ")}
                 </Badge>
+                {detail.client && <Badge variant="outline">{detail.client}</Badge>}
               </div>
               {detail.description && (
                 <p className="text-sm whitespace-pre-wrap">{detail.description}</p>

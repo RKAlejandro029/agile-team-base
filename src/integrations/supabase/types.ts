@@ -281,6 +281,7 @@ export type Database = {
       };
       profiles: {
         Row: {
+          allowed_tabs: string[];
           avatar_url: string | null;
           created_at: string;
           current_task: string | null;
@@ -294,6 +295,7 @@ export type Database = {
           work_start_time: string;
         };
         Insert: {
+          allowed_tabs?: string[];
           avatar_url?: string | null;
           created_at?: string;
           current_task?: string | null;
@@ -307,6 +309,7 @@ export type Database = {
           work_start_time?: string;
         };
         Update: {
+          allowed_tabs?: string[];
           avatar_url?: string | null;
           created_at?: string;
           current_task?: string | null;
@@ -356,6 +359,7 @@ export type Database = {
       tickets: {
         Row: {
           assigned_to: string | null;
+          client: string | null;
           created_at: string;
           created_by: string;
           description: string | null;
@@ -367,6 +371,7 @@ export type Database = {
         };
         Insert: {
           assigned_to?: string | null;
+          client?: string | null;
           created_at?: string;
           created_by: string;
           description?: string | null;
@@ -378,6 +383,7 @@ export type Database = {
         };
         Update: {
           assigned_to?: string | null;
+          client?: string | null;
           created_at?: string;
           created_by?: string;
           description?: string | null;
@@ -422,6 +428,14 @@ export type Database = {
           department: string;
           full_name: string;
           id: string;
+        }[];
+      };
+      get_active_today: {
+        Args: Record<string, never>;
+        Returns: {
+          user_id: string;
+          full_name: string;
+          status: string;
         }[];
       };
       get_team_leave: {

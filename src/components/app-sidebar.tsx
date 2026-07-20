@@ -11,6 +11,7 @@ import {
   Users,
   KeyRound,
   History,
+  FileBarChart,
 } from "lucide-react";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import {
@@ -31,29 +32,27 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
 const items = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Leave & Holidays", url: "/leave", icon: CalendarDays },
-  { title: "Messages", url: "/messages", icon: MessageSquare },
-  { title: "Email", url: "/email", icon: Mail },
-  { title: "Calendar", url: "/calendar", icon: Calendar },
-  { title: "Tickets", url: "/tickets", icon: Ticket },
+  { key: "dashboard", title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { key: "time", title: "Time Tracking", url: "/time", icon: Clock },
+  { key: "leave", title: "Leave & Holidays", url: "/leave", icon: CalendarDays },
+  { key: "messages", title: "Messages", url: "/messages", icon: MessageSquare },
+  { key: "email", title: "Email", url: "/email", icon: Mail },
+  { key: "calendar", title: "Calendar", url: "/calendar", icon: Calendar },
+  { key: "tickets", title: "Tickets", url: "/tickets", icon: Ticket },
 ];
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { user, role, isAdmin, isCeo, signOut } = useAuth();
+  const { user, role, isAdmin, isCeo, allowedTabs, signOut } = useAuth();
 
   const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
 
-  // Same tabs for everyone — CEO isn't required to clock in or file leave,
-  // but the tabs themselves stay consistent with what Admin sees.
-  const navItems = [
-    items[0],
-    { title: "Time Tracking", url: "/time", icon: Clock },
-    ...items.slice(1),
-  ];
+  // Only the tabs this specific person has been granted (CEO customizes this
+  // per-person from the Team page). Team/History/Reports below are separate —
+  // those are hard role gates, not something allowedTabs can grant.
+  const navItems = items.filter((item) => allowedTabs.includes(item.key));
 
   return (
     <Sidebar collapsible="icon">
@@ -109,6 +108,16 @@ export function AppSidebar() {
                     <Link to="/history">
                       <History className="h-4 w-4" />
                       <span>History</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+              {isCeo && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/reports"}>
+                    <Link to="/reports">
+                      <FileBarChart className="h-4 w-4" />
+                      <span>Reports</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

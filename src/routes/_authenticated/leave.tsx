@@ -751,28 +751,33 @@ function LeavePage() {
                           </TableCell>
                           {isAdmin && (
                             <TableCell className="text-right">
-                              {r.status === "pending" && (
-                                <div className="flex gap-1 justify-end">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() =>
-                                      review.mutate({ request: r, status: "approved" })
-                                    }
-                                  >
-                                    <Check className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() =>
-                                      review.mutate({ request: r, status: "rejected" })
-                                    }
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              )}
+                              {r.status === "pending" &&
+                                (r.user_id === user?.id ? (
+                                  <span className="text-xs italic text-muted-foreground">
+                                    Needs another admin
+                                  </span>
+                                ) : (
+                                  <div className="flex gap-1 justify-end">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        review.mutate({ request: r, status: "approved" })
+                                      }
+                                    >
+                                      <Check className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        review.mutate({ request: r, status: "rejected" })
+                                      }
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                ))}
                             </TableCell>
                           )}
                         </TableRow>

@@ -14,10 +14,18 @@ import {
   TicketCheck,
   CircleDot,
   MessageSquare,
+  Users,
+  Bell,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { formatDistanceToNowStrict } from "date-fns";
+import { formatDistanceToNowStrict, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  leave_approved: "Your leave was approved",
+  leave_rejected: "Your leave was rejected",
+  ticket_created: "A ticket was created for you",
+};
 
 export function ConsultantHome() {
   const { user } = useAuth();
@@ -79,9 +87,12 @@ export function ConsultantHome() {
       const today = new Date().toISOString().slice(0, 10);
       const [balances, tickets, unread, events] = await Promise.all([
         supabase.from("leave_balances").select("*").eq("user_id", user!.id),
-        // Every ticket in the workspace (not just this user's own) so the
-        // Open / Pending / Ongoing counts reflect the whole team's queue.
-        supabase.from("tickets").select("id, status"),
+        // Only tickets assigned to (or created by) ME — a ticket handed to a
+        // colleague shouldn't show up as "pending" on my dashboard.
+        supabase
+          .from("tickets")
+          .select("id, status")
+          .or(`assigned_to.eq.${user!.id},created_by.eq.${user!.id}`),
         supabase.from("messages").select("id").eq("receiver_id", user!.id).is("read_at", null),
         supabase
           .from("calendar_events")
@@ -101,6 +112,38 @@ export function ConsultantHome() {
       };
     },
     enabled: !!user,
+  });
+
+  // Who's clocked in right now, company-wide — a small security-definer RPC
+  // handles this since normal RLS would only show my own attendance.
+  const activeTodayQ = useQuery({
+    queryKey: ["active-today"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_active_today");
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!user,
+    refetchInterval: 30_000,
+  });
+
+  // Notifications — anything where I'm the target, most recent first, so I
+  // find out my leave got approved without having to go check.
+  const notificationsQ = useQuery({
+    queryKey: ["my-notifications", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("activity_log")
+        .select("*")
+        .eq("target_user_id", user!.id)
+        .neq("actor_id", user!.id)
+        .order("occurred_at", { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!user,
+    refetchInterval: 30_000,
   });
 
   const clockMutation = useMutation({
@@ -327,8 +370,8 @@ export function ConsultantHome() {
       </div>
 
       {/* Quick figures — ledger strip, matches admin dashboard's stat treatment.
-          Ticket counts are workspace-wide (Open / Ongoing / Done), not just this user's. */}
-      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-3 lg:grid-cols-6 sm:divide-x sm:divide-y-0">
+          Ticket counts are just what's assigned to or filed by me. */}
+      <div className="grid grid-cols-2 divide-y divide-border overflow-hidden rounded-md border sm:grid-cols-3 lg:grid-cols-7 sm:divide-x sm:divide-y-0">
         <QuickCell
           to="/leave"
           icon={<CalendarDays className="h-3.5 w-3.5" />}
@@ -343,21 +386,21 @@ export function ConsultantHome() {
         <QuickCell
           to="/tickets"
           icon={<CircleDot className="h-3.5 w-3.5" />}
-          label="Open tickets"
+          label="My pending"
           value={summaryQ.data?.openTickets ?? "—"}
           sub="not yet started"
         />
         <QuickCell
           to="/tickets"
           icon={<TicketCheck className="h-3.5 w-3.5" />}
-          label="Ongoing tickets"
+          label="My ongoing"
           value={summaryQ.data?.ongoingTickets ?? "—"}
           sub="in progress"
         />
         <QuickCell
           to="/tickets"
           icon={<Ticket className="h-3.5 w-3.5" />}
-          label="Done tickets"
+          label="My done"
           value={summaryQ.data?.doneTickets ?? "—"}
           sub="completed"
         />
@@ -367,6 +410,13 @@ export function ConsultantHome() {
           label="Unread"
           value={summaryQ.data?.unread ?? "—"}
           sub="in your inbox"
+        />
+        <QuickCell
+          to="/dashboard"
+          icon={<Users className="h-3.5 w-3.5" />}
+          label="Active today"
+          value={activeTodayQ.data?.length ?? "—"}
+          sub="clocked in now"
         />
         <QuickCell
           to="/calendar"
@@ -382,6 +432,59 @@ export function ConsultantHome() {
           }
           sub={summaryQ.data?.events[0]?.title || "Nothing scheduled"}
         />
+      </div>
+
+      {/* Who's active + notifications */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-md border">
+          <div className="flex items-center gap-2 border-b px-4 py-3">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <h2 className="font-display text-base font-medium">Active today</h2>
+          </div>
+          <div className="divide-y">
+            {activeTodayQ.data?.map((p) => (
+              <div
+                key={p.user_id}
+                className="flex items-center justify-between px-4 py-2.5 text-sm"
+              >
+                <span>{p.full_name}</span>
+                <span
+                  className={"text-xs " + (p.status === "break" ? "text-warning" : "text-success")}
+                >
+                  {p.status === "break" ? "On break" : "Active"}
+                </span>
+              </div>
+            ))}
+            {activeTodayQ.data?.length === 0 && (
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+                No one's clocked in right now.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-md border">
+          <div className="flex items-center gap-2 border-b px-4 py-3">
+            <Bell className="h-4 w-4 text-muted-foreground" />
+            <h2 className="font-display text-base font-medium">Notifications</h2>
+          </div>
+          <div className="divide-y">
+            {notificationsQ.data?.map((n) => (
+              <div key={n.id} className="px-4 py-2.5 text-sm">
+                <p>
+                  {ACTIVITY_LABELS[n.action] ?? n.action}
+                  {n.detail && <span className="text-muted-foreground"> — {n.detail}</span>}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatDistanceToNow(new Date(n.occurred_at), { addSuffix: true })}
+                </p>
+              </div>
+            ))}
+            {notificationsQ.data?.length === 0 && (
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nothing new.</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
