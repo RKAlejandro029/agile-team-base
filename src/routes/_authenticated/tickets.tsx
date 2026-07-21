@@ -30,7 +30,7 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
 type Priority = "low" | "medium" | "high" | "urgent";
-type Status = "open" | "in_progress" | "done";
+type Status = "open" | "in_progress" | "waiting_client" | "done";
 
 const priorityColor: Record<Priority, string> = {
   low: "bg-muted text-muted-foreground",
@@ -42,8 +42,25 @@ const priorityColor: Record<Priority, string> = {
 const statusColor: Record<Status, string> = {
   open: "bg-info/10 text-info",
   in_progress: "bg-warning/10 text-warning",
+  waiting_client: "bg-muted text-muted-foreground",
   done: "bg-success/10 text-success",
 };
+
+const statusLabel: Record<Status, string> = {
+  open: "Open",
+  in_progress: "Ongoing",
+  waiting_client: "Waiting on client",
+  done: "Done",
+};
+
+const TICKET_CATEGORIES = [
+  "Bug",
+  "Access request",
+  "Data / reporting",
+  "Infrastructure",
+  "Client request",
+  "Other",
+];
 
 export const Route = createFileRoute("/_authenticated/tickets")({
   component: TicketsPage,
@@ -56,6 +73,7 @@ function TicketsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [issue, setIssue] = useState("");
   const [client, setClient] = useState("");
+  const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [assignedTo, setAssignedTo] = useState<string>("");
@@ -130,6 +148,7 @@ function TicketsPage() {
       const { error } = await supabase.from("tickets").insert({
         title: issue,
         client: client || null,
+        category: category || null,
         description,
         priority,
         created_by: user!.id,
@@ -143,6 +162,7 @@ function TicketsPage() {
       setOpen(false);
       setIssue("");
       setClient("");
+      setCategory("");
       setDescription("");
       setPriority("medium");
       setAssignedTo("");
@@ -180,8 +200,11 @@ function TicketsPage() {
   const counts = {
     open: (ticketsQ.data ?? []).filter((t) => t.status === "open").length,
     in_progress: (ticketsQ.data ?? []).filter((t) => t.status === "in_progress").length,
+    waiting_client: (ticketsQ.data ?? []).filter((t) => t.status === "waiting_client").length,
     done: (ticketsQ.data ?? []).filter((t) => t.status === "done").length,
   };
+  const isOverdue = (t: { due_at: string | null; status: string }) =>
+    !!t.due_at && t.status !== "done" && new Date(t.due_at) < new Date();
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
@@ -201,6 +224,7 @@ function TicketsPage() {
               <SelectItem value="all">All statuses</SelectItem>
               <SelectItem value="open">Open</SelectItem>
               <SelectItem value="in_progress">In progress</SelectItem>
+              <SelectItem value="waiting_client">Waiting on client</SelectItem>
               <SelectItem value="done">Done</SelectItem>
             </SelectContent>
           </Select>
@@ -238,6 +262,21 @@ function TicketsPage() {
                     onChange={(e) => setClient(e.target.value)}
                     placeholder="Which client is this for?"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Category</Label>
+                  <Select value={category} onValueChange={setCategory}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="What kind of issue is this?" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TICKET_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Description</Label>
@@ -296,7 +335,7 @@ function TicketsPage() {
 
       {/* Status chips — click to filter, always visible so anyone can see the shape
           of their queue at a glance without opening the dropdown. */}
-      <div className="grid grid-cols-3 divide-x overflow-hidden rounded-md border">
+      <div className="grid grid-cols-2 divide-x divide-y sm:grid-cols-4 sm:divide-y-0 overflow-hidden rounded-md border">
         <StatusChip
           active={filter === "open"}
           onClick={() => setFilter(filter === "open" ? "all" : "open")}
@@ -310,6 +349,13 @@ function TicketsPage() {
           label="Ongoing"
           count={counts.in_progress}
           className={statusColor.in_progress}
+        />
+        <StatusChip
+          active={filter === "waiting_client"}
+          onClick={() => setFilter(filter === "waiting_client" ? "all" : "waiting_client")}
+          label="Waiting on client"
+          count={counts.waiting_client}
+          className={statusColor.waiting_client}
         />
         <StatusChip
           active={filter === "done"}
@@ -347,8 +393,16 @@ function TicketsPage() {
                       className={cn("capitalize", statusColor[t.status as Status])}
                       variant="secondary"
                     >
-                      {t.status.replace("_", " ")}
+                      {statusLabel[t.status as Status]}
                     </Badge>
+                    {isOverdue(t) && (
+                      <Badge className="bg-destructive/15 text-destructive" variant="secondary">
+                        Overdue
+                      </Badge>
+                    )}
+                    {t.category && (
+                      <span className="text-xs text-muted-foreground">· {t.category}</span>
+                    )}
                     {t.client && (
                       <span className="text-xs text-muted-foreground">· {t.client}</span>
                     )}
@@ -362,6 +416,14 @@ function TicketsPage() {
                     <span className="mx-1">·</span>
                     Filed by {creator?.full_name || creator?.email} · Updated{" "}
                     {format(new Date(t.updated_at), "MMM d, h:mm a")}
+                    {t.due_at && t.status !== "done" && (
+                      <>
+                        <span className="mx-1">·</span>
+                        <span className={isOverdue(t) ? "text-destructive" : ""}>
+                          Due {format(new Date(t.due_at), "MMM d, h:mm a")}
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <Select
@@ -374,6 +436,7 @@ function TicketsPage() {
                   <SelectContent>
                     <SelectItem value="open">Open</SelectItem>
                     <SelectItem value="in_progress">In progress</SelectItem>
+                    <SelectItem value="waiting_client">Waiting on client</SelectItem>
                     <SelectItem value="done">Done</SelectItem>
                   </SelectContent>
                 </Select>
@@ -404,13 +467,36 @@ function TicketsPage() {
                   className={cn("capitalize", statusColor[detail.status as Status])}
                   variant="secondary"
                 >
-                  {detail.status.replace("_", " ")}
+                  {statusLabel[detail.status as Status]}
                 </Badge>
                 {detail.client && <Badge variant="outline">{detail.client}</Badge>}
+                {detail.category && <Badge variant="outline">{detail.category}</Badge>}
               </div>
               {detail.description && (
                 <p className="text-sm whitespace-pre-wrap">{detail.description}</p>
               )}
+              <div className="grid grid-cols-2 gap-2 rounded-md border p-3 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Due by</p>
+                  <p
+                    className={
+                      detail.due_at && isOverdue(detail)
+                        ? "font-medium text-destructive"
+                        : "font-medium"
+                    }
+                  >
+                    {detail.due_at ? format(new Date(detail.due_at), "MMM d, h:mm a") : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">First response</p>
+                  <p className="font-medium">
+                    {detail.first_response_at
+                      ? format(new Date(detail.first_response_at), "MMM d, h:mm a")
+                      : "Awaiting"}
+                  </p>
+                </div>
+              </div>
               <div>
                 <h3 className="font-medium text-sm mb-2">Activity</h3>
                 <div className="space-y-2">

@@ -12,6 +12,8 @@ import {
   KeyRound,
   History,
   FileBarChart,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import {
@@ -28,6 +30,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/use-auth";
+import { useTheme } from "@/hooks/use-theme";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
@@ -46,6 +49,7 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user, role, isAdmin, isCeo, allowedTabs, signOut } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   const initials = (user?.email ?? "?").slice(0, 2).toUpperCase();
 
@@ -142,6 +146,15 @@ export function AppSidebar() {
                 </p>
                 <p className="text-[10px] text-sidebar-foreground/60 capitalize">{role}</p>
               </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                onClick={toggleTheme}
+                aria-label="Toggle theme"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
               <ChangePasswordDialog
                 trigger={
                   <Button

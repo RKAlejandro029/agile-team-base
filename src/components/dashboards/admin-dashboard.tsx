@@ -79,7 +79,7 @@ export function AdminDashboard() {
           .lte("start_date", today)
           .gte("end_date", today),
         supabase.from("tickets").select("id, status").in("status", ["open", "in_progress"]),
-        supabase.from("tickets").select("status"),
+        supabase.from("tickets").select("status, due_at"),
         supabase
           .from("leave_requests")
           .select("id, user_id, leave_type, start_date, end_date, created_at")
@@ -143,6 +143,10 @@ export function AdminDashboard() {
 
       const allTickets = allTicketsRes.data ?? [];
       const doneAllTime = allTickets.filter((t) => t.status === "done").length;
+      const now = new Date();
+      const overdueCount = allTickets.filter(
+        (t) => t.status !== "done" && t.due_at && new Date(t.due_at) < now,
+      ).length;
 
       return {
         consultants,
@@ -156,6 +160,7 @@ export function AdminDashboard() {
             allTickets.length > 0 ? Math.round((doneAllTime / allTickets.length) * 100) : null,
           ticketsDoneAllTime: doneAllTime,
           totalTickets: allTickets.length,
+          overdueCount,
         },
       };
     },
@@ -258,7 +263,7 @@ export function AdminDashboard() {
           <div className="border-b px-4 py-3 sm:px-5">
             <h2 className="font-display text-lg font-medium">Workforce KPIs</h2>
           </div>
-          <div className="grid grid-cols-2 divide-x divide-y">
+          <div className="grid grid-cols-2 divide-x divide-y sm:grid-cols-3">
             <div className="px-4 py-4 sm:px-5">
               <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                 Attendance rate
@@ -294,6 +299,19 @@ export function AdminDashboard() {
               </p>
               <p className="font-mono-data text-2xl text-foreground">
                 {data?.kpi.totalTickets ?? 0}
+              </p>
+            </div>
+            <div className="px-4 py-4 sm:px-5">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                Overdue (past SLA)
+              </p>
+              <p
+                className={
+                  "font-mono-data text-2xl " +
+                  ((data?.kpi.overdueCount ?? 0) > 0 ? "text-destructive" : "text-foreground")
+                }
+              >
+                {data?.kpi.overdueCount ?? 0}
               </p>
             </div>
           </div>

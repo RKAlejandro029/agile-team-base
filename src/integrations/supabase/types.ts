@@ -359,10 +359,13 @@ export type Database = {
       tickets: {
         Row: {
           assigned_to: string | null;
+          category: string | null;
           client: string | null;
           created_at: string;
           created_by: string;
           description: string | null;
+          due_at: string | null;
+          first_response_at: string | null;
           id: string;
           priority: Database["public"]["Enums"]["ticket_priority"];
           status: Database["public"]["Enums"]["ticket_status"];
@@ -371,10 +374,13 @@ export type Database = {
         };
         Insert: {
           assigned_to?: string | null;
+          category?: string | null;
           client?: string | null;
           created_at?: string;
           created_by: string;
           description?: string | null;
+          due_at?: string | null;
+          first_response_at?: string | null;
           id?: string;
           priority?: Database["public"]["Enums"]["ticket_priority"];
           status?: Database["public"]["Enums"]["ticket_status"];
@@ -383,10 +389,13 @@ export type Database = {
         };
         Update: {
           assigned_to?: string | null;
+          category?: string | null;
           client?: string | null;
           created_at?: string;
           created_by?: string;
           description?: string | null;
+          due_at?: string | null;
+          first_response_at?: string | null;
           id?: string;
           priority?: Database["public"]["Enums"]["ticket_priority"];
           status?: Database["public"]["Enums"]["ticket_status"];
@@ -477,7 +486,7 @@ export type Database = {
         | "lieu"
         | "solo_parent";
       ticket_priority: "low" | "medium" | "high" | "urgent";
-      ticket_status: "open" | "in_progress" | "done";
+      ticket_status: "open" | "in_progress" | "done" | "waiting_client";
     };
     CompositeTypes: {
       [_ in never]: never;
@@ -612,7 +621,7 @@ export const Constants = {
         "solo_parent",
       ],
       ticket_priority: ["low", "medium", "high", "urgent"],
-      ticket_status: ["open", "in_progress", "done"],
+      ticket_status: ["open", "in_progress", "done", "waiting_client"],
     },
   },
 } as const;
