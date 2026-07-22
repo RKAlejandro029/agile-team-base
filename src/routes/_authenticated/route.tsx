@@ -1,6 +1,7 @@
 import { createFileRoute, Navigate, Outlet } from "@tanstack/react-router";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { GlobalSearch } from "@/components/global-search";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated")({
@@ -58,6 +59,9 @@ function AuthenticatedLayout() {
         <div className="flex-1 flex flex-col min-w-0">
           <header className="h-14 flex items-center gap-2 border-b bg-card px-4 sticky top-0 z-10">
             <SidebarTrigger />
+            <div className="flex flex-1 justify-end">
+              <GlobalSearch />
+            </div>
           </header>
           <main className="flex-1 overflow-auto">
             <Outlet />

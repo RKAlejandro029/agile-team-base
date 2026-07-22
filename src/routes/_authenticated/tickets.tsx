@@ -83,11 +83,18 @@ function TicketsPage() {
   // Everyone the ticket could be assigned to. CEO/Admin can hand a ticket to
   // any consultant (or themselves); a consultant filing one can still assign
   // it to a colleague or keep it for themselves.
+  // Uses get_profiles_directory() rather than querying profiles directly —
+  // profiles RLS only lets a non-admin see their OWN row, so a plain
+  // supabase.from("profiles") lookup here would silently return nobody.
   const peopleQ = useQuery({
     queryKey: ["ticket-assignees"],
-    queryFn: async () =>
-      (await supabase.from("profiles").select("id, full_name, email").order("full_name")).data ??
-      [],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_profiles_directory");
+      if (error) throw error;
+      return (data ?? [])
+        .slice()
+        .sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
+    },
   });
 
   const ticketsQ = useQuery({
@@ -102,15 +109,11 @@ function TicketsPage() {
       if (rows.length === 0) return [];
       // creator/assignee aren't embedded via FK here because tickets.created_by
       // and .assigned_to reference auth.users, not profiles directly —
-      // PostgREST can't resolve that as an embed, so fetch profiles separately.
-      const userIds = [
-        ...new Set(rows.flatMap((r) => [r.created_by, r.assigned_to]).filter(Boolean)),
-      ] as string[];
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, full_name, email")
-        .in("id", userIds);
-      const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
+      // PostgREST can't resolve that as an embed. And a plain profiles query
+      // wouldn't work for non-admins anyway (RLS only allows your own row),
+      // so this uses the same directory RPC as peopleQ.
+      const { data: directory } = await supabase.rpc("get_profiles_directory");
+      const byId = new Map((directory ?? []).map((p) => [p.id, p]));
       return rows.map((r) => ({
         ...r,
         creator: byId.get(r.created_by) ?? null,
@@ -132,15 +135,51 @@ function TicketsPage() {
       if (error) throw error;
       const rows = data ?? [];
       if (rows.length === 0) return [];
-      const userIds = [...new Set(rows.map((r) => r.user_id))];
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, full_name, email")
-        .in("id", userIds);
-      const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
+      const { data: directory } = await supabase.rpc("get_profiles_directory");
+      const byId = new Map((directory ?? []).map((p) => [p.id, p]));
       return rows.map((r) => ({ ...r, profiles: byId.get(r.user_id) ?? null }));
     },
     enabled: !!detailId,
+  });
+
+  const assignmentHistoryQ = useQuery({
+    queryKey: ["ticket-assignment-history", detailId],
+    queryFn: async () => {
+      if (!detailId) return [];
+      const { data, error } = await supabase
+        .from("ticket_assignment_history")
+        .select("*")
+        .eq("ticket_id", detailId)
+        .order("changed_at", { ascending: false });
+      if (error) throw error;
+      const rows = data ?? [];
+      if (rows.length === 0) return [];
+      const { data: directory } = await supabase.rpc("get_profiles_directory");
+      const byId = new Map((directory ?? []).map((p) => [p.id, p]));
+      return rows.map((r) => ({
+        ...r,
+        from: r.from_user ? (byId.get(r.from_user) ?? null) : null,
+        to: r.to_user ? (byId.get(r.to_user) ?? null) : null,
+        by: r.changed_by ? (byId.get(r.changed_by) ?? null) : null,
+      }));
+    },
+    enabled: !!detailId,
+  });
+
+  const reassign = useMutation({
+    mutationFn: async ({ id, assignedTo: newAssignee }: { id: string; assignedTo: string }) => {
+      const { error } = await supabase
+        .from("tickets")
+        .update({ assigned_to: newAssignee })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Ticket reassigned");
+      qc.invalidateQueries({ queryKey: ["tickets"] });
+      qc.invalidateQueries({ queryKey: ["ticket-assignment-history"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const create = useMutation({
@@ -317,7 +356,7 @@ function TicketsPage() {
                           ?.filter((p) => p.id !== user?.id)
                           .map((p) => (
                             <SelectItem key={p.id} value={p.id}>
-                              {p.full_name || p.email}
+                              {p.full_name || "Unnamed"}
                             </SelectItem>
                           ))}
                       </SelectContent>
@@ -368,11 +407,8 @@ function TicketsPage() {
 
       <div className="grid gap-3">
         {filtered.map((t) => {
-          const creator = (t as unknown as { creator: { full_name: string; email: string } | null })
-            .creator;
-          const assignee = (
-            t as unknown as { assignee: { full_name: string; email: string } | null }
-          ).assignee;
+          const creator = (t as unknown as { creator: { full_name: string } | null }).creator;
+          const assignee = (t as unknown as { assignee: { full_name: string } | null }).assignee;
           return (
             <Card
               key={t.id}
@@ -412,9 +448,9 @@ function TicketsPage() {
                   )}
                   <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                     <UserCircle2 className="h-3 w-3" />
-                    {assignee?.full_name || assignee?.email || "Unassigned"}
+                    {assignee?.full_name || "Unassigned"}
                     <span className="mx-1">·</span>
-                    Filed by {creator?.full_name || creator?.email} · Updated{" "}
+                    Filed by {creator?.full_name || "someone"} · Updated{" "}
                     {format(new Date(t.updated_at), "MMM d, h:mm a")}
                     {t.due_at && t.status !== "done" && (
                       <>
@@ -497,17 +533,53 @@ function TicketsPage() {
                   </p>
                 </div>
               </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Assigned to</Label>
+                <Select
+                  value={detail.assigned_to ?? "unassigned"}
+                  onValueChange={(v) => reassign.mutate({ id: detail.id, assignedTo: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {peopleQ.data?.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.full_name || "Unnamed"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {assignmentHistoryQ.data && assignmentHistoryQ.data.length > 0 && (
+                <div>
+                  <h3 className="font-medium text-sm mb-2">Reassignment history</h3>
+                  <div className="space-y-1.5">
+                    {assignmentHistoryQ.data.map((h) => (
+                      <p key={h.id} className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          {h.from?.full_name || "Unassigned"}
+                        </span>{" "}
+                        →{" "}
+                        <span className="font-medium text-foreground">
+                          {h.to?.full_name || "Unassigned"}
+                        </span>{" "}
+                        by {h.by?.full_name || "someone"} ·{" "}
+                        {format(new Date(h.changed_at), "MMM d, h:mm a")}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <h3 className="font-medium text-sm mb-2">Activity</h3>
                 <div className="space-y-2">
                   {detailQ.data?.map((u) => {
-                    const p = (
-                      u as unknown as { profiles: { full_name: string; email: string } | null }
-                    ).profiles;
+                    const p = (u as unknown as { profiles: { full_name: string } | null }).profiles;
                     return (
                       <div key={u.id} className="text-sm border-l-2 border-primary/40 pl-3 py-1">
                         <p className="text-xs text-muted-foreground">
-                          {p?.full_name || p?.email} ·{" "}
+                          {p?.full_name || "Unnamed"} ·{" "}
                           {format(new Date(u.created_at), "MMM d, h:mm a")}
                         </p>
                         <p>{u.content}</p>

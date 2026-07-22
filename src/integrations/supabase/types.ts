@@ -324,6 +324,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      ticket_assignment_history: {
+        Row: {
+          changed_at: string;
+          changed_by: string | null;
+          from_user: string | null;
+          id: string;
+          ticket_id: string;
+          to_user: string | null;
+        };
+        Insert: {
+          changed_at?: string;
+          changed_by?: string | null;
+          from_user?: string | null;
+          id?: string;
+          ticket_id: string;
+          to_user?: string | null;
+        };
+        Update: {
+          changed_at?: string;
+          changed_by?: string | null;
+          from_user?: string | null;
+          id?: string;
+          ticket_id?: string;
+          to_user?: string | null;
+        };
+        Relationships: [];
+      };
       ticket_updates: {
         Row: {
           content: string;
