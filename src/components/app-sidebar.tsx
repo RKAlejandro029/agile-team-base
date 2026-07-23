@@ -14,6 +14,7 @@ import {
   FileBarChart,
   Sun,
   Moon,
+  Send,
 } from "lucide-react";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import {
@@ -122,6 +123,16 @@ export function AppSidebar() {
                     <Link to="/reports">
                       <FileBarChart className="h-4 w-4" />
                       <span>Reports</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+              {isCeo && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/telegram-bot"}>
+                    <Link to="/telegram-bot">
+                      <Send className="h-4 w-4" />
+                      <span>Telegram bot</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

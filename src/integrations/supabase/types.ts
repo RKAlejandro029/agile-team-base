@@ -431,6 +431,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      telegram_config: {
+        Row: {
+          bot_token: string | null;
+          ceo_chat_id: string | null;
+          id: string;
+          link_code: string | null;
+          link_code_expires_at: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          bot_token?: string | null;
+          ceo_chat_id?: string | null;
+          id?: string;
+          link_code?: string | null;
+          link_code_expires_at?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          bot_token?: string | null;
+          ceo_chat_id?: string | null;
+          id?: string;
+          link_code?: string | null;
+          link_code_expires_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       user_roles: {
         Row: {
           created_at: string;
