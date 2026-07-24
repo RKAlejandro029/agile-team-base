@@ -67,6 +67,7 @@ const FILEABLE_TYPES: LeaveType[] = [
   "sick",
   "birthday",
   "lieu",
+  "emergency",
   "maternity",
   "paternity",
   "solo_parent",
@@ -79,6 +80,7 @@ const leaveTypeHints: Partial<Record<LeaveType, string>> = {
   birthday:
     "1 day/year, filed at the start of the year with your Vacation Leave. Must fall on or near your birthday.",
   lieu: "Compensatory leave, used at your manager's discretion.",
+  emergency: "For genuine, unforeseen emergencies. No advance notice required.",
   maternity:
     "Up to 105 days paid (RA 11210). Requires supporting documents — HR will confirm your exact entitlement.",
   paternity: "7 days paid for married male employees (RA 8187). Requires supporting documents.",
@@ -134,7 +136,6 @@ function LeavePage() {
       .channel("leave-requests-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "leave_requests" }, () => {
         qc.invalidateQueries({ queryKey: ["leave-requests"] });
-        qc.invalidateQueries({ queryKey: ["leave-balances"] });
       })
       .subscribe();
     return () => {
@@ -151,6 +152,11 @@ function LeavePage() {
   const [isBulkSchedule, setIsBulkSchedule] = useState(() => new Date().getMonth() === 0);
   const [holidayName, setHolidayName] = useState("");
   const [holidayDate, setHolidayDate] = useState("");
+  const [policyType, setPolicyType] = useState<LeaveType>("vacation");
+  const [policyTotal, setPolicyTotal] = useState("");
+  const [policyEffective, setPolicyEffective] = useState(() =>
+    format(new Date(Date.now() + 24 * 60 * 60 * 1000), "yyyy-MM-dd"),
+  );
 
   const requestsQ = useQuery({
     queryKey: ["leave-requests", role, user?.id],
@@ -194,11 +200,50 @@ function LeavePage() {
   const myWorkDays = profileQ.data?.work_days ?? DEFAULT_WORK_DAYS;
   const myOffDays = [0, 1, 2, 3, 4, 5, 6].filter((d) => !myWorkDays.includes(d));
 
-  const balancesQ = useQuery({
-    queryKey: ["leave-balances", user?.id],
-    queryFn: async () =>
-      (await supabase.from("leave_balances").select("*").eq("user_id", user!.id)).data ?? [],
-    enabled: !!user,
+  // Entitlement comes from leave_type_config (whatever's effective as of
+  // today), not a stored number — so a CEO policy change takes effect the
+  // moment its effective date arrives, with nothing to push or batch-update.
+  const configQ = useQuery({
+    queryKey: ["leave-type-config"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("leave_type_config")
+        .select("*")
+        .order("effective_from", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const currentYear = new Date().getFullYear();
+  const yearStart = `${currentYear}-01-01`;
+  const yearEnd = `${currentYear}-12-31`;
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+
+  // "Used this year" is computed live from approved/pending requests, not a
+  // mutable counter — so it naturally zeroes out every January with no
+  // scheduled job needed, and never drifts from what was actually approved.
+  const balances = FILEABLE_TYPES.filter(
+    (t) => t !== "maternity" && t !== "paternity" && t !== "solo_parent",
+  ).map((leaveType) => {
+    const history = (configQ.data ?? []).filter((c) => c.leave_type === leaveType);
+    const effective = history.filter((c) => c.effective_from <= todayStr).pop();
+    const totalDays = effective ? Number(effective.total_days) : 0;
+    const usage = (requestsQ.data ?? []).filter(
+      (r) =>
+        r.leave_type === leaveType &&
+        r.user_id === user?.id &&
+        (r.status === "approved" || r.status === "pending") &&
+        r.start_date >= yearStart &&
+        r.start_date <= yearEnd,
+    );
+    const usedDays = usage.reduce(
+      (sum, r) =>
+        sum + weekdaysBetweenInclusive(new Date(r.start_date), new Date(r.end_date), myWorkDays),
+      0,
+    );
+    const remaining = Math.max(totalDays - usedDays, 0);
+    return { leaveType, totalDays, usedDays, remaining, hasConfig: !!effective };
   });
 
   const holidaysQ = useQuery({
@@ -268,44 +313,17 @@ function LeavePage() {
       };
       status: "approved" | "rejected";
     }) => {
+      // Nothing else to update — "used this year" is computed live from
+      // approved requests, so there's no counter to increment here anymore.
       const { error } = await supabase
         .from("leave_requests")
         .update({ status, reviewed_by: user!.id, reviewed_at: new Date().toISOString() })
         .eq("id", request.id);
       if (error) throw error;
-
-      // Approving deducts the requested weekdays from the matching balance, if
-      // one exists on file. Conditional-entitlement types (maternity/paternity/
-      // solo parent) often won't have a pre-existing balance row — that's fine,
-      // it's skipped silently rather than erroring the whole approval.
-      if (status === "approved") {
-        const [{ data: balance }, { data: profile }] = await Promise.all([
-          supabase
-            .from("leave_balances")
-            .select("id, used_days")
-            .eq("user_id", request.user_id)
-            .eq("leave_type", request.leave_type)
-            .maybeSingle(),
-          supabase.from("profiles").select("work_days").eq("id", request.user_id).maybeSingle(),
-        ]);
-        if (balance) {
-          const days = weekdaysBetweenInclusive(
-            new Date(request.start_date),
-            new Date(request.end_date),
-            profile?.work_days ?? DEFAULT_WORK_DAYS,
-          );
-          const { error: balErr } = await supabase
-            .from("leave_balances")
-            .update({ used_days: Number(balance.used_days) + days })
-            .eq("id", balance.id);
-          if (balErr) throw balErr;
-        }
-      }
     },
     onSuccess: () => {
       toast.success("Updated");
       qc.invalidateQueries({ queryKey: ["leave-requests"] });
-      qc.invalidateQueries({ queryKey: ["leave-balances"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -323,6 +341,30 @@ function LeavePage() {
       setHolidayOpen(false);
       setHolidayName("");
       setHolidayDate("");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const addPolicy = useMutation({
+    mutationFn: async () => {
+      const total = Number(policyTotal);
+      if (!Number.isFinite(total) || total < 0) throw new Error("Enter a valid number of days.");
+      const { error } = await supabase.from("leave_type_config").insert({
+        leave_type: policyType,
+        total_days: total,
+        effective_from: policyEffective,
+        created_by: user!.id,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success(
+        policyEffective <= todayStr
+          ? "Policy updated"
+          : `Policy will take effect ${policyEffective}`,
+      );
+      qc.invalidateQueries({ queryKey: ["leave-type-config"] });
+      setPolicyTotal("");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -567,65 +609,67 @@ function LeavePage() {
 
       {!isCeo && (
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {balancesQ.data
-            ?.filter((b) => b.leave_type !== "personal")
-            .map((b) => {
-              const remaining = Number(b.total_days) - Number(b.used_days);
-              const vacationUsage =
-                b.leave_type === "vacation"
-                  ? (requestsQ.data ?? []).filter(
-                      (r) =>
-                        r.leave_type === "vacation" &&
-                        r.user_id === user?.id &&
-                        (r.status === "approved" || r.status === "pending"),
-                    )
-                  : null;
-              const bulkUsed = vacationUsage
-                ?.filter((r) => r.is_bulk_schedule)
-                .reduce(
-                  (sum, r) =>
-                    sum +
-                    weekdaysBetweenInclusive(
-                      new Date(r.start_date),
-                      new Date(r.end_date),
-                      myWorkDays,
-                    ),
-                  0,
-                );
-              const silUsed = vacationUsage
-                ?.filter((r) => !r.is_bulk_schedule)
-                .reduce(
-                  (sum, r) =>
-                    sum +
-                    weekdaysBetweenInclusive(
-                      new Date(r.start_date),
-                      new Date(r.end_date),
-                      myWorkDays,
-                    ),
-                  0,
-                );
-              return (
-                <Card key={b.id}>
-                  <CardContent className="p-4">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                      {leaveTypeLabels[b.leave_type]}
-                    </p>
-                    <p className="text-2xl font-semibold">
-                      {remaining}
-                      <span className="text-sm text-muted-foreground font-normal">
-                        {" "}
-                        / {b.total_days} days
-                      </span>
-                    </p>
-                    {b.leave_type === "vacation" && (
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {bulkUsed ?? 0}/10 scheduled · {silUsed ?? 0}/5 SIL used (filed or pending)
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
+          {balances.map((b) => {
+            const vacationUsage =
+              b.leaveType === "vacation"
+                ? (requestsQ.data ?? []).filter(
+                    (r) =>
+                      r.leave_type === "vacation" &&
+                      r.user_id === user?.id &&
+                      (r.status === "approved" || r.status === "pending"),
+                  )
+                : null;
+            const bulkUsed = vacationUsage
+              ?.filter((r) => r.is_bulk_schedule)
+              .reduce(
+                (sum, r) =>
+                  sum +
+                  weekdaysBetweenInclusive(
+                    new Date(r.start_date),
+                    new Date(r.end_date),
+                    myWorkDays,
+                  ),
+                0,
               );
-            })}
+            const silUsed = vacationUsage
+              ?.filter((r) => !r.is_bulk_schedule)
+              .reduce(
+                (sum, r) =>
+                  sum +
+                  weekdaysBetweenInclusive(
+                    new Date(r.start_date),
+                    new Date(r.end_date),
+                    myWorkDays,
+                  ),
+                0,
+              );
+            return (
+              <Card key={b.leaveType}>
+                <CardContent className="p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                    {leaveTypeLabels[b.leaveType]}
+                  </p>
+                  <p className="text-2xl font-semibold">
+                    {b.remaining}
+                    <span className="text-sm text-muted-foreground font-normal">
+                      {" "}
+                      / {b.totalDays} days
+                    </span>
+                  </p>
+                  {b.leaveType === "vacation" && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {bulkUsed ?? 0}/10 scheduled · {silUsed ?? 0}/5 SIL used (filed or pending)
+                    </p>
+                  )}
+                  {!b.hasConfig && (
+                    <p className="mt-1 text-[11px] text-warning">
+                      No policy set for this type yet.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -633,6 +677,7 @@ function LeavePage() {
         <TabsList>
           <TabsTrigger value="requests">Requests</TabsTrigger>
           <TabsTrigger value="holidays">Company holidays</TabsTrigger>
+          {isCeo && <TabsTrigger value="policy">Leave policy</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="requests">
@@ -865,6 +910,140 @@ function LeavePage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {isCeo && (
+          <TabsContent value="policy">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Current entitlements</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {FILEABLE_TYPES.filter(
+                      (t) => t !== "maternity" && t !== "paternity" && t !== "solo_parent",
+                    ).map((t) => {
+                      const history = (configQ.data ?? []).filter((c) => c.leave_type === t);
+                      const effective = history.filter((c) => c.effective_from <= todayStr).pop();
+                      const upcoming = history.find((c) => c.effective_from > todayStr);
+                      return (
+                        <div key={t} className="rounded-md border p-3">
+                          <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                            {leaveTypeLabels[t]}
+                          </p>
+                          <p className="text-xl font-semibold">
+                            {effective ? Number(effective.total_days) : "—"}
+                            <span className="text-sm font-normal text-muted-foreground">
+                              {" "}
+                              days/yr
+                            </span>
+                          </p>
+                          {upcoming && (
+                            <p className="mt-1 text-[11px] text-warning">
+                              Changing to {Number(upcoming.total_days)} on {upcoming.effective_from}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Change a policy</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-xs text-muted-foreground">
+                    This doesn't edit anyone's balance directly — it changes the entitlement from
+                    the effective date forward. If someone's already used more than the new total
+                    this year, their remaining just shows 0 (never negative) until it resets next
+                    January.
+                  </p>
+                  <form
+                    className="grid gap-3 sm:grid-cols-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      addPolicy.mutate();
+                    }}
+                  >
+                    <div className="space-y-2">
+                      <Label>Leave type</Label>
+                      <Select
+                        value={policyType}
+                        onValueChange={(v) => setPolicyType(v as LeaveType)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FILEABLE_TYPES.filter(
+                            (t) => t !== "maternity" && t !== "paternity" && t !== "solo_parent",
+                          ).map((t) => (
+                            <SelectItem key={t} value={t}>
+                              {leaveTypeLabels[t]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>New total (days/year)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        required
+                        value={policyTotal}
+                        onChange={(e) => setPolicyTotal(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Effective from</Label>
+                      <Input
+                        type="date"
+                        required
+                        value={policyEffective}
+                        onChange={(e) => setPolicyEffective(e.target.value)}
+                      />
+                    </div>
+                    <Button type="submit" className="sm:col-span-3" disabled={addPolicy.isPending}>
+                      {addPolicy.isPending ? "Saving…" : "Save policy change"}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">History</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="divide-y">
+                    {(configQ.data ?? [])
+                      .slice()
+                      .reverse()
+                      .map((c) => (
+                        <div key={c.id} className="flex items-center justify-between py-2 text-sm">
+                          <span>
+                            {leaveTypeLabels[c.leave_type]} → {Number(c.total_days)} days/yr
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            effective {c.effective_from}
+                          </span>
+                        </div>
+                      ))}
+                    {(configQ.data ?? []).length === 0 && (
+                      <p className="py-6 text-center text-sm text-muted-foreground">
+                        No changes yet.
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -10,6 +10,7 @@ export const leaveTypeLabels: Record<LeaveType, string> = {
   maternity: "Maternity",
   paternity: "Paternity",
   solo_parent: "Solo parent",
+  emergency: "Emergency",
   personal: "Personal",
 };
 

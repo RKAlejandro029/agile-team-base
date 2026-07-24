@@ -180,27 +180,30 @@ export type Database = {
         };
         Relationships: [];
       };
-      leave_balances: {
+      leave_type_config: {
         Row: {
+          created_at: string;
+          created_by: string | null;
+          effective_from: string;
           id: string;
           leave_type: Database["public"]["Enums"]["leave_type"];
           total_days: number;
-          used_days: number;
-          user_id: string;
         };
         Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          effective_from: string;
           id?: string;
           leave_type: Database["public"]["Enums"]["leave_type"];
-          total_days?: number;
-          used_days?: number;
-          user_id: string;
+          total_days: number;
         };
         Update: {
+          created_at?: string;
+          created_by?: string | null;
+          effective_from?: string;
           id?: string;
           leave_type?: Database["public"]["Enums"]["leave_type"];
           total_days?: number;
-          used_days?: number;
-          user_id?: string;
         };
         Relationships: [];
       };
@@ -538,7 +541,8 @@ export type Database = {
         | "maternity"
         | "paternity"
         | "lieu"
-        | "solo_parent";
+        | "solo_parent"
+        | "emergency";
       ticket_priority: "low" | "medium" | "high" | "urgent";
       ticket_status: "open" | "in_progress" | "done" | "waiting_client";
     };
@@ -673,6 +677,7 @@ export const Constants = {
         "paternity",
         "lieu",
         "solo_parent",
+        "emergency",
       ],
       ticket_priority: ["low", "medium", "high", "urgent"],
       ticket_status: ["open", "in_progress", "done", "waiting_client"],

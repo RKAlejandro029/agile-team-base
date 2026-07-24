@@ -85,8 +85,15 @@ export function ConsultantHome() {
     queryKey: ["consultant-summary", user?.id],
     queryFn: async () => {
       const today = new Date().toISOString().slice(0, 10);
-      const [balances, tickets, unread, events] = await Promise.all([
-        supabase.from("leave_balances").select("*").eq("user_id", user!.id),
+      const yearStart = `${new Date().getFullYear()}-01-01`;
+      const [config, myLeaveThisYear, tickets, unread, events] = await Promise.all([
+        supabase.from("leave_type_config").select("*").order("effective_from", { ascending: true }),
+        supabase
+          .from("leave_requests")
+          .select("leave_type, status, start_date, end_date")
+          .eq("user_id", user!.id)
+          .in("status", ["approved", "pending"])
+          .gte("start_date", yearStart),
         // Only tickets assigned to (or created by) ME — a ticket handed to a
         // colleague shouldn't show up as "pending" on my dashboard.
         supabase
@@ -102,8 +109,29 @@ export function ConsultantHome() {
           .limit(3),
       ]);
       const ticketRows = tickets.data ?? [];
+
+      // Total remaining across every leave type — entitlement (as of today,
+      // per leave_type_config) minus what's already used/pending this year,
+      // clamped at 0 per type so an over-drawn type doesn't drag the total
+      // negative.
+      const configRows = config.data ?? [];
+      const usageRows = myLeaveThisYear.data ?? [];
+      const types = [...new Set(configRows.map((c) => c.leave_type))];
+      const totalRemaining = types.reduce((sum, t) => {
+        const history = configRows.filter((c) => c.leave_type === t && c.effective_from <= today);
+        const entitlement = history.length > 0 ? Number(history[history.length - 1].total_days) : 0;
+        const used = usageRows
+          .filter((r) => r.leave_type === t)
+          .reduce((s, r) => {
+            const days =
+              (new Date(r.end_date).getTime() - new Date(r.start_date).getTime()) / 86_400_000 + 1;
+            return s + days;
+          }, 0);
+        return sum + Math.max(entitlement - used, 0);
+      }, 0);
+
       return {
-        balances: balances.data ?? [],
+        leaveDaysRemaining: totalRemaining,
         openTickets: ticketRows.filter((t) => t.status === "open").length,
         ongoingTickets: ticketRows.filter((t) => t.status === "in_progress").length,
         doneTickets: ticketRows.filter((t) => t.status === "done").length,
@@ -376,11 +404,7 @@ export function ConsultantHome() {
           to="/leave"
           icon={<CalendarDays className="h-3.5 w-3.5" />}
           label="Leave balance"
-          value={
-            summaryQ.data?.balances
-              .reduce((a, b) => a + Number(b.total_days) - Number(b.used_days), 0)
-              .toFixed(0) ?? "—"
-          }
+          value={summaryQ.data?.leaveDaysRemaining.toFixed(0) ?? "—"}
           sub="days remaining"
         />
         <QuickCell
