@@ -207,6 +207,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      leave_type_settings: {
+        Row: {
+          is_active: boolean;
+          leave_type: Database["public"]["Enums"]["leave_type"];
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          is_active?: boolean;
+          leave_type: Database["public"]["Enums"]["leave_type"];
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          is_active?: boolean;
+          leave_type?: Database["public"]["Enums"]["leave_type"];
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
       leave_requests: {
         Row: {
           created_at: string;

@@ -215,6 +215,24 @@ function LeavePage() {
     },
   });
 
+  // Which discretionary types are still filable — retiring one hides it from
+  // the filing dropdown and the Policy tab's editable list without touching
+  // any past request. Statutory types never appear here, so they're always
+  // treated as active/filable.
+  const settingsQ = useQuery({
+    queryKey: ["leave-type-settings"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("leave_type_settings").select("*");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const isTypeActive = (t: LeaveType) => {
+    if (t === "maternity" || t === "paternity" || t === "solo_parent") return true;
+    const row = settingsQ.data?.find((s) => s.leave_type === t);
+    return row ? row.is_active : true;
+  };
+
   const currentYear = new Date().getFullYear();
   const yearStart = `${currentYear}-01-01`;
   const yearEnd = `${currentYear}-12-31`;
@@ -369,6 +387,30 @@ function LeavePage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const toggleTypeActive = useMutation({
+    mutationFn: async ({ type, active }: { type: LeaveType; active: boolean }) => {
+      const { error } = await supabase.from("leave_type_settings").upsert(
+        {
+          leave_type: type,
+          is_active: active,
+          updated_by: user!.id,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "leave_type" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      toast.success(
+        vars.active
+          ? `${leaveTypeLabels[vars.type]} reactivated`
+          : `${leaveTypeLabels[vars.type]} retired`,
+      );
+      qc.invalidateQueries({ queryKey: ["leave-type-settings"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="p-6 space-y-6 max-w-6xl">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -443,7 +485,7 @@ function LeavePage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {FILEABLE_TYPES.map((t) => (
+                      {FILEABLE_TYPES.filter(isTypeActive).map((t) => (
                         <SelectItem key={t} value={t}>
                           {leaveTypeLabels[t]}
                         </SelectItem>
@@ -926,11 +968,19 @@ function LeavePage() {
                       const history = (configQ.data ?? []).filter((c) => c.leave_type === t);
                       const effective = history.filter((c) => c.effective_from <= todayStr).pop();
                       const upcoming = history.find((c) => c.effective_from > todayStr);
+                      const active = isTypeActive(t);
                       return (
                         <div key={t} className="rounded-md border p-3">
-                          <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                            {leaveTypeLabels[t]}
-                          </p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                              {leaveTypeLabels[t]}
+                            </p>
+                            {!active && (
+                              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                                Retired
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xl font-semibold">
                             {effective ? Number(effective.total_days) : "—"}
                             <span className="text-sm font-normal text-muted-foreground">
@@ -943,6 +993,16 @@ function LeavePage() {
                               Changing to {Number(upcoming.total_days)} on {upcoming.effective_from}
                             </p>
                           )}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="mt-2 h-7 w-full text-xs"
+                            disabled={toggleTypeActive.isPending}
+                            onClick={() => toggleTypeActive.mutate({ type: t, active: !active })}
+                          >
+                            {active ? "Retire" : "Reactivate"}
+                          </Button>
                         </div>
                       );
                     })}
