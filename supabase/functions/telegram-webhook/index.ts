@@ -64,6 +64,15 @@ async function handleToday(): Promise<string> {
   return `<b>Active today (${lines.length})</b>\n${lines.join("\n")}`;
 }
 
+async function labelFor(leaveType: string): Promise<string> {
+  const { data } = await supabase
+    .from("leave_type_settings")
+    .select("custom_label")
+    .eq("leave_type", leaveType)
+    .maybeSingle();
+  return data?.custom_label && data.custom_label.trim().length > 0 ? data.custom_label : leaveType;
+}
+
 async function handleLeave(): Promise<string> {
   const { todayStr } = todayRange();
   const { data } = await supabase
@@ -74,7 +83,7 @@ async function handleLeave(): Promise<string> {
     .gte("end_date", todayStr);
   if (!data || data.length === 0) return "No one's on approved leave today.";
   const lines = await Promise.all(
-    data.map(async (l) => `🌴 ${await nameOf(l.user_id)} (${l.leave_type})`),
+    data.map(async (l) => `🌴 ${await nameOf(l.user_id)} (${await labelFor(l.leave_type)})`),
   );
   return `<b>On leave today (${lines.length})</b>\n${lines.join("\n")}`;
 }

@@ -8,6 +8,7 @@ import { MessageSquare, Users, Calendar, Ticket, PlaneTakeoff, Coffee } from "lu
 import { Link } from "@tanstack/react-router";
 import { formatDistanceToNowStrict } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useLeaveTypeLabels } from "@/hooks/use-leave-type-labels";
 
 interface ConsultantRow {
   id: string;
@@ -21,6 +22,7 @@ interface ConsultantRow {
 
 export function AdminDashboard() {
   const qc = useQueryClient();
+  const leaveTypeLabels = useLeaveTypeLabels();
 
   // Live updates: anyone clocking in/out, starting/ending a break, or filing
   // leave shows up here immediately — no need to switch tabs or wait for the
@@ -244,7 +246,7 @@ export function AdminDashboard() {
                   <span className="font-medium">
                     {r.profile?.full_name || r.profile?.email || "Someone"}
                   </span>{" "}
-                  <span className="capitalize text-muted-foreground">{r.leave_type}</span>
+                  <span className="text-muted-foreground">{leaveTypeLabels[r.leave_type]}</span>
                 </span>
                 <span className="shrink-0 font-mono-data text-xs text-muted-foreground">
                   {formatDistanceToNowStrict(new Date(r.created_at))} ago

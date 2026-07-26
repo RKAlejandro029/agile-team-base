@@ -209,18 +209,21 @@ export type Database = {
       };
       leave_type_settings: {
         Row: {
+          custom_label: string | null;
           is_active: boolean;
           leave_type: Database["public"]["Enums"]["leave_type"];
           updated_at: string;
           updated_by: string | null;
         };
         Insert: {
+          custom_label?: string | null;
           is_active?: boolean;
           leave_type: Database["public"]["Enums"]["leave_type"];
           updated_at?: string;
           updated_by?: string | null;
         };
         Update: {
+          custom_label?: string | null;
           is_active?: boolean;
           leave_type?: Database["public"]["Enums"]["leave_type"];
           updated_at?: string;

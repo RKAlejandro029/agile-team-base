@@ -27,6 +27,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -45,9 +47,16 @@ import {
   AlertTriangle,
   FileWarning,
   CalendarDays as CalendarIcon,
+  Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { leaveTypeLabels, DAY_LABELS, DISPLAY_ORDER, type LeaveType } from "@/lib/leave-types";
+import {
+  leaveTypeLabels as defaultLeaveTypeLabels,
+  DAY_LABELS,
+  DISPLAY_ORDER,
+  type LeaveType,
+} from "@/lib/leave-types";
+import { useLeaveTypeSettings, useLeaveTypeLabels } from "@/hooks/use-leave-type-labels";
 
 // Leave types requiring 5 working days advance notice, per the Leave Benefits
 // Policy ("except in cases of emergency or unforeseen circumstances").
@@ -157,6 +166,8 @@ function LeavePage() {
   const [policyEffective, setPolicyEffective] = useState(() =>
     format(new Date(Date.now() + 24 * 60 * 60 * 1000), "yyyy-MM-dd"),
   );
+  const [renameTarget, setRenameTarget] = useState<LeaveType | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
 
   const requestsQ = useQuery({
     queryKey: ["leave-requests", role, user?.id],
@@ -219,19 +230,15 @@ function LeavePage() {
   // the filing dropdown and the Policy tab's editable list without touching
   // any past request. Statutory types never appear here, so they're always
   // treated as active/filable.
-  const settingsQ = useQuery({
-    queryKey: ["leave-type-settings"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("leave_type_settings").select("*");
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
+  const settingsQ = useLeaveTypeSettings();
   const isTypeActive = (t: LeaveType) => {
     if (t === "maternity" || t === "paternity" || t === "solo_parent") return true;
     const row = settingsQ.data?.find((s) => s.leave_type === t);
     return row ? row.is_active : true;
   };
+  // Labels reflect any CEO renames — falls back to the built-in default the
+  // instant a type has no override on file.
+  const leaveTypeLabels = useLeaveTypeLabels();
 
   const currentYear = new Date().getFullYear();
   const yearStart = `${currentYear}-01-01`;
@@ -407,6 +414,29 @@ function LeavePage() {
           : `${leaveTypeLabels[vars.type]} retired`,
       );
       qc.invalidateQueries({ queryKey: ["leave-type-settings"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const renameType = useMutation({
+    mutationFn: async () => {
+      if (!renameTarget) return;
+      const label = renameDraft.trim();
+      const { error } = await supabase.from("leave_type_settings").upsert(
+        {
+          leave_type: renameTarget,
+          custom_label: label.length > 0 ? label : null,
+          updated_by: user!.id,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "leave_type" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Renamed");
+      qc.invalidateQueries({ queryKey: ["leave-type-settings"] });
+      setRenameTarget(null);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -971,12 +1001,20 @@ function LeavePage() {
                       const active = isTypeActive(t);
                       return (
                         <div key={t} className="rounded-md border p-3">
-                          <div className="flex items-center justify-between">
-                            <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                              {leaveTypeLabels[t]}
-                            </p>
+                          <div className="flex items-center justify-between gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRenameTarget(t);
+                                setRenameDraft(leaveTypeLabels[t]);
+                              }}
+                              className="flex min-w-0 items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground hover:underline underline-offset-2"
+                            >
+                              <span className="truncate">{leaveTypeLabels[t]}</span>
+                              <Pencil className="h-2.5 w-2.5 shrink-0" />
+                            </button>
                             {!active && (
-                              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
                                 Retired
                               </span>
                             )}
@@ -1105,6 +1143,44 @@ function LeavePage() {
           </TabsContent>
         )}
       </Tabs>
+
+      <Dialog open={!!renameTarget} onOpenChange={(o) => !o && setRenameTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Rename {renameTarget ? defaultLeaveTypeLabels[renameTarget] : ""}
+            </DialogTitle>
+            <DialogDescription>
+              Changes how this leave type is displayed everywhere — filing, requests, the dashboard,
+              and the Telegram bot. It doesn't change any past records or its underlying rules.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Display name</Label>
+            <Input
+              value={renameDraft}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              placeholder={renameTarget ? defaultLeaveTypeLabels[renameTarget] : ""}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => renameTarget && setRenameDraft(defaultLeaveTypeLabels[renameTarget])}
+            >
+              Reset to default
+            </Button>
+            <Button
+              type="button"
+              disabled={renameType.isPending}
+              onClick={() => renameType.mutate()}
+            >
+              {renameType.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

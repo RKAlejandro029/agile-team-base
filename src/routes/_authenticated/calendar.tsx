@@ -35,7 +35,7 @@ import {
 } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { leaveTypeLabels } from "@/lib/leave-types";
+import { useLeaveTypeLabels } from "@/hooks/use-leave-type-labels";
 
 export const Route = createFileRoute("/_authenticated/calendar")({
   component: CalendarPage,
@@ -44,6 +44,7 @@ export const Route = createFileRoute("/_authenticated/calendar")({
 function CalendarPage() {
   const { user, isAdmin } = useAuth();
   const qc = useQueryClient();
+  const leaveTypeLabels = useLeaveTypeLabels();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
